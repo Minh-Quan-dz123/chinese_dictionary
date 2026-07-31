@@ -5,12 +5,12 @@ const PINYIN_TONES = {
   o: ["ō", "ó", "ǒ", "ò", "o"],
   u: ["ū", "ú", "ǔ", "ù", "u"],
   v: ["ǖ", "ǘ", "ǚ", "ǜ", "ü"],
-  u: ["ǖ", "ǘ", "ǚ", "ǜ", "ü"], // Cho trường hợp u: -> ü
+  "u:": ["ǖ", "ǘ", "ǚ", "ǜ", "ü"], // Fix lỗi trùng key u trong object cũ của mày
 };
 
 export function convertNumberedToMarked(rawPinyin) {
   if (!rawPinyin) return "";
-  
+
   return rawPinyin
     .split(" ")
     .map((syllable) => {
@@ -23,7 +23,7 @@ export function convertNumberedToMarked(rawPinyin) {
 
       letters = letters.toLowerCase().replace(/v|u:/g, "v");
 
-      // Quy tắc đặt dấu Pinyin: a -> o -> e -> i/u (chữ nào đứng sau)
+      // Quy tắc đặt dấu Pinyin: a -> o -> e -> i/u
       for (const vowel of ["a", "o", "e"]) {
         if (letters.includes(vowel)) {
           return letters.replace(vowel, PINYIN_TONES[vowel][tone]);
@@ -42,5 +42,5 @@ export function convertNumberedToMarked(rawPinyin) {
       }
       return letters;
     })
-    .join(" ");
+    .join(""); // <-- SỬA Ở ĐÂY: đổi .join(" ") thành .join("") để các âm tiết của 1 từ dính sát vào nhau
 }

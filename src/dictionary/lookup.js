@@ -14,7 +14,7 @@ export function lookup(text) {
     };
   }
 
-  // 2. Longest Match cho câu dài hoặc cụm từ ghép (Chỉ lấy Pinyin)
+  // 2. Longest Match cho câu dài hoặc cụm từ ghép
   let index = 0;
   const pinyinParts = [];
 
@@ -33,14 +33,27 @@ export function lookup(text) {
 
     if (!matched) {
       const char = input[index];
-      pinyinParts.push(char);
+      // Kiểm tra nếu ký tự này là dấu câu (/, :, ：, ...) thì đệm khoảng trắng cho đẹp
+      if (/[/:：,，;；]/.test(char)) {
+        pinyinParts.push(` ${char} `);
+      } else if (/\s/.test(char)) {
+        pinyinParts.push(" ");
+      } else {
+        pinyinParts.push(char);
+      }
       index++;
     }
   }
 
   if (pinyinParts.length === 0) return null;
 
+  // Nối các phần lại, sau đó dọn dẹp các khoảng trắng bị lặp/thừa
+  const formattedPinyin = pinyinParts
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return {
-    pinyin: pinyinParts.join(" "),
+    pinyin: formattedPinyin,
   };
 }
