@@ -2,21 +2,17 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { playSound } from "../utils/sound";
 
 export default function GameModal({ questions, onClose }) {
-  // --- STATE CÀI ĐẶT (SETTINGS) ---
+  // --- STATE CÀI ĐẶT ---
   const [isPlaying, setIsPlaying] = useState(false);
   const [timeLimit, setTimeLimit] = useState(30); 
   const [maxWrongAllowed, setMaxWrongAllowed] = useState(1); 
-  
-  // YÊU CẦU 1: Số lượng đáp án hiển thị (Người dùng có thể nhập tùy ý)
   const [optionsCount, setOptionsCount] = useState(6);
 
-  // --- STATE TRÒ CHƠI (GAMEPLAY) ---
+  // --- STATE TRÒ CHƠI ---
   const [currentIndex, setCurrentIndex] = useState(0);
   const [timeLeft, setTimeLeft] = useState(timeLimit);
   const [isGameOver, setIsGameOver] = useState(false);
   const [isReviewMode, setIsReviewMode] = useState(false);
-
-  // YÊU CẦU 3: State Zoom mức độ hiển thị (%)
   const [zoomLevel, setZoomLevel] = useState(100);
 
   const [questionProgress, setQuestionProgress] = useState({});
@@ -37,7 +33,6 @@ export default function GameModal({ questions, onClose }) {
       .map(q => q.answer)
       .filter(ans => ans !== correctAnswer);
 
-    // Dùng số lượng user nhập (nếu bỏ trống hoặc nhập vớ vẩn thì mặc định là 6)
     const validCount = Math.max(2, Number(optionsCount) || 6);
 
     const selectedWrongs = allWrongAnswers
@@ -62,6 +57,7 @@ export default function GameModal({ questions, onClose }) {
     return Object.values(questionProgress).filter((item) => item.solved).length;
   }, [questionProgress]);
 
+  // ĐỒNG HỒ ĐẾM NGƯỢC
   useEffect(() => {
     if (!isPlaying || isGameOver || currentProgress.solved || isReviewMode) return;
 
@@ -93,15 +89,13 @@ export default function GameModal({ questions, onClose }) {
   }
 
   function handleStartGame() {
-    // Đảm bảo optionsCount hợp lệ trước khi vào game
     if (!optionsCount || optionsCount < 2) setOptionsCount(6);
-
     playSound("click");
     setIsPlaying(true);
     setCurrentIndex(0);
     setIsGameOver(false);
     setIsReviewMode(false);
-    setZoomLevel(100); // Reset zoom khi chơi mới
+    setZoomLevel(100); 
 
     const initialProgress = {};
     shuffledQuestions.forEach((_, idx) => {
@@ -164,19 +158,91 @@ export default function GameModal({ questions, onClose }) {
     playSound("click");
     setCurrentIndex((prev) => Math.min(shuffledQuestions.length - 1, prev + 1));
   }
-  
+
   const gridClass = useMemo(() => {
     const count = Number(optionsCount) || 6;
     if (count <= 4) return "grid-cols-2";
     if (count <= 6) return "grid-cols-2 md:grid-cols-3";
     if (count <= 9) return "grid-cols-3";
     if (count <= 12) return "grid-cols-3 md:grid-cols-4";
-    return "grid-cols-4 md:grid-cols-5"; // Hỗ trợ nếu user nhập số to hơn 12
+    return "grid-cols-4 md:grid-cols-5";
   }, [optionsCount]);
+
+  // =================================================================
+  // ĐIỂM TỐI ƯU HIỆU NĂNG 1: Đóng băng thanh cuộn 1000 nút bấm
+  // Nó sẽ KHÔNG render lại mỗi giây khi đồng hồ đếm ngược nữa
+  // =================================================================
+  const paginationUI = useMemo(() => {
+    return (
+      <div className="flex gap-1.5 overflow-x-auto pb-2 px-1 max-w-full justify-start md:justify-center scrollbar-thin scrollbar-thumb-slate-200">
+        {shuffledQuestions.map((_, idx) => {
+          const prog = questionProgress[idx] || {};
+          const isCurrent = idx === currentIndex;
+          let bgStyle = "bg-slate-100 text-slate-600 border-slate-200";
+
+          if (isCurrent) {
+            bgStyle = "ring-2 ring-indigo-500 ring-offset-2 bg-white text-indigo-600 font-bold border-indigo-300";
+          } else if (prog.solved) {
+            bgStyle = prog.isCorrect
+              ? "bg-green-100 text-green-700 border-green-300 font-bold"
+              : "bg-red-100 text-red-700 border-red-300 font-bold";
+          }
+
+          return (
+            <button
+              key={idx}
+              onClick={() => {
+                playSound("click");
+                setCurrentIndex(idx);
+              }}
+              className={`w-9 h-9 rounded-xl border text-xs shrink-0 flex items-center justify-center transition cursor-pointer ${bgStyle}`}
+            >
+              {idx + 1}
+            </button>
+          );
+        })}
+      </div>
+    );
+  }, [shuffledQuestions.length, currentIndex, questionProgress]);
+
+  // =================================================================
+  // ĐIỂM TỐI ƯU HIỆU NĂNG 2: Đóng băng danh sách đáp án
+  // =================================================================
+  const optionsUI = useMemo(() => {
+    return (
+      <div className={`grid ${gridClass} gap-3 max-h-[300px] overflow-y-auto p-1 scrollbar-thin scrollbar-thumb-slate-200`}>
+        {currentOptions.map((option, idx) => {
+          const isWrong = currentProgress.selectedWrongs.includes(option);
+          const isCorrect = currentProgress.solved && option === currentQuestion.answer;
+          const isDisabled = currentProgress.solved || isWrong;
+
+          let cardStyle = "bg-white border-slate-200 text-slate-700 hover:border-indigo-500 hover:bg-indigo-50/50 shadow-sm";
+
+          if (isCorrect) {
+            cardStyle = "bg-green-500 border-green-600 text-white font-bold shadow-md";
+          } else if (isWrong) {
+            cardStyle = "bg-red-50 border-red-200 text-red-400 line-through cursor-not-allowed opacity-60";
+          } else if (currentProgress.solved) {
+            cardStyle = "bg-slate-50 border-slate-100 text-slate-400 opacity-50 cursor-not-allowed";
+          }
+
+          return (
+            <button
+              key={idx}
+              disabled={isDisabled}
+              onClick={() => handleSelectOption(option)}
+              className={`p-4 rounded-2xl font-semibold text-base border transition text-center cursor-pointer flex items-center justify-center min-h-[72px] ${cardStyle}`}
+            >
+              {option}
+            </button>
+          );
+        })}
+      </div>
+    );
+  }, [currentOptions, currentProgress, currentQuestion, gridClass]);
 
   return (
     <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[9999] flex items-center justify-center p-4 selection:bg-indigo-500 selection:text-white">
-      {/* YÊU CẦU 2: Đổi overflow-hidden thành overflow-y-auto và scrollbar-thin để modal cuộn mượt */}
       <div className="bg-white rounded-3xl max-w-4xl w-full p-6 md:p-8 shadow-2xl flex flex-col min-h-[580px] max-h-[90vh] justify-between border border-slate-100 relative overflow-y-auto scrollbar-thin scrollbar-thumb-slate-200">
         
         {!isPlaying ? (
@@ -220,7 +286,6 @@ export default function GameModal({ questions, onClose }) {
                 />
               </div>
               
-              {/* YÊU CẦU 1: Kết hợp input number với datalist để user tự nhập + gợi ý */}
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1">
                   🔠 Số lượng đáp án hiển thị:
@@ -366,7 +431,6 @@ export default function GameModal({ questions, onClose }) {
               </div>
 
               <div className="flex items-center gap-3">
-                {/* YÊU CẦU 3: Cụm điều khiển Zoom */}
                 <div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg px-2 py-1">
                   <span className="text-xs text-slate-500 font-bold mr-1">🔍</span>
                   <select 
@@ -398,7 +462,7 @@ export default function GameModal({ questions, onClose }) {
               </div>
             </div>
 
-            {/* Thanh tiến độ */}
+            {/* Thanh tiến độ UI đã được tối ưu */}
             <div className="mb-6">
               <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden mb-3">
                 <div
@@ -406,35 +470,8 @@ export default function GameModal({ questions, onClose }) {
                   style={{ width: `${(completedCount / shuffledQuestions.length) * 100}%` }}
                 />
               </div>
-
-              <div className="flex gap-1.5 overflow-x-auto pb-2 px-1 max-w-full justify-start md:justify-center scrollbar-thin scrollbar-thumb-slate-200">
-                {shuffledQuestions.map((_, idx) => {
-                  const prog = questionProgress[idx] || {};
-                  const isCurrent = idx === currentIndex;
-                  let bgStyle = "bg-slate-100 text-slate-600 border-slate-200";
-
-                  if (isCurrent) {
-                    bgStyle = "ring-2 ring-indigo-500 ring-offset-2 bg-white text-indigo-600 font-bold border-indigo-300";
-                  } else if (prog.solved) {
-                    bgStyle = prog.isCorrect
-                      ? "bg-green-100 text-green-700 border-green-300 font-bold"
-                      : "bg-red-100 text-red-700 border-red-300 font-bold";
-                  }
-
-                  return (
-                    <button
-                      key={idx}
-                      onClick={() => {
-                        playSound("click");
-                        setCurrentIndex(idx);
-                      }}
-                      className={`w-9 h-9 rounded-xl border text-xs shrink-0 flex items-center justify-center transition cursor-pointer ${bgStyle}`}
-                    >
-                      {idx + 1}
-                    </button>
-                  );
-                })}
-              </div>
+              
+              {paginationUI} 
             </div>
 
             {/* Vùng GAME PLAY CHÍNH ĐƯỢC ZOOM */}
@@ -459,34 +496,7 @@ export default function GameModal({ questions, onClose }) {
                 </div>
               </div>
 
-              <div className={`grid ${gridClass} gap-3 max-h-[300px] overflow-y-auto p-1 scrollbar-thin scrollbar-thumb-slate-200`}>
-                {currentOptions.map((option, idx) => {
-                  const isWrong = currentProgress.selectedWrongs.includes(option);
-                  const isCorrect = currentProgress.solved && option === currentQuestion.answer;
-                  const isDisabled = currentProgress.solved || isWrong;
-
-                  let cardStyle = "bg-white border-slate-200 text-slate-700 hover:border-indigo-500 hover:bg-indigo-50/50 shadow-sm";
-
-                  if (isCorrect) {
-                    cardStyle = "bg-green-500 border-green-600 text-white font-bold shadow-md";
-                  } else if (isWrong) {
-                    cardStyle = "bg-red-50 border-red-200 text-red-400 line-through cursor-not-allowed opacity-60";
-                  } else if (currentProgress.solved) {
-                    cardStyle = "bg-slate-50 border-slate-100 text-slate-400 opacity-50 cursor-not-allowed";
-                  }
-
-                  return (
-                    <button
-                      key={idx}
-                      disabled={isDisabled}
-                      onClick={() => handleSelectOption(option)}
-                      className={`p-4 rounded-2xl font-semibold text-base border transition text-center cursor-pointer flex items-center justify-center min-h-[72px] ${cardStyle}`}
-                    >
-                      {option}
-                    </button>
-                  );
-                })}
-              </div>
+              {optionsUI}
             </div>
 
             {/* Footer */}
