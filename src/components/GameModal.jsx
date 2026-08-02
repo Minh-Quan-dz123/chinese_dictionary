@@ -1,35 +1,48 @@
-// src/components/GameModal.jsx
 import { useState, useEffect, useMemo, useRef } from "react";
 import { playSound } from "../utils/sound";
 
 export default function GameModal({ questions, onClose }) {
   // --- STATE CÀI ĐẶT (SETTINGS) ---
   const [isPlaying, setIsPlaying] = useState(false);
-  const [timeLimit, setTimeLimit] = useState(30); // Giây mỗi câu
-  const [maxWrongAllowed, setMaxWrongAllowed] = useState(1); // Cho phép sai tối đa N lần
+  const [timeLimit, setTimeLimit] = useState(30); 
+  const [maxWrongAllowed, setMaxWrongAllowed] = useState(1); 
+  
+  // TÍNH NĂNG MỚI: Tùy chỉnh số lượng đáp án hiển thị (mặc định là 6)
+  const [optionsCount, setOptionsCount] = useState(6);
 
   // --- STATE TRÒ CHƠI (GAMEPLAY) ---
   const [currentIndex, setCurrentIndex] = useState(0);
   const [timeLeft, setTimeLeft] = useState(timeLimit);
   const [isGameOver, setIsGameOver] = useState(false);
+  const [isReviewMode, setIsReviewMode] = useState(false);
 
-  // Lưu trạng thái từng câu: { solved: boolean, isCorrect: boolean, wrongCount: number, selectedWrongs: string[] }
   const [questionProgress, setQuestionProgress] = useState({});
-
   const timerRef = useRef(null);
 
-  // --- 1. TRỘN NGẪU NHIÊN THỨ TỰ CÂU HỎI MỖI KHI BẮT ĐẦU CHƠI ---
   const shuffledQuestions = useMemo(() => {
     return [...questions].sort(() => Math.random() - 0.5);
   }, [questions, isPlaying]);
 
-  // --- 2. TRỘN NGẪU NHIÊN DANH SÁCH ĐÁP ÁN (BẢNG CHỌN) ---
-  const allOptions = useMemo(() => {
-    const options = shuffledQuestions.map((q) => q.answer);
-    return [...options].sort(() => Math.random() - 0.5);
-  }, [shuffledQuestions]);
-
   const currentQuestion = shuffledQuestions[currentIndex];
+
+  // LOGIC ĐÁP ÁN: Tạo động theo số lượng user cấu hình
+  const currentOptions = useMemo(() => {
+    if (!currentQuestion) return [];
+    
+    const correctAnswer = currentQuestion.answer;
+    
+    const allWrongAnswers = questions
+      .map(q => q.answer)
+      .filter(ans => ans !== correctAnswer);
+
+    // Lấy số đáp án sai bằng tổng số lượng cấu hình trừ đi 1 (đáp án đúng)
+    const selectedWrongs = allWrongAnswers
+      .sort(() => Math.random() - 0.5)
+      .slice(0, optionsCount - 1);
+
+    return [correctAnswer, ...selectedWrongs].sort(() => Math.random() - 0.5);
+  }, [currentQuestion, questions, optionsCount]);
+
   const currentProgress = questionProgress[currentIndex] || {
     solved: false,
     isCorrect: false,
@@ -37,19 +50,16 @@ export default function GameModal({ questions, onClose }) {
     selectedWrongs: [],
   };
 
-  // --- TÍNH ĐIỂM: SỐ CÂU ĐÚNG / TỔNG SỐ CÂU ---
   const correctCount = useMemo(() => {
     return Object.values(questionProgress).filter((item) => item.isCorrect).length;
   }, [questionProgress]);
 
-  // --- TÍNH SỐ CÂU ĐÃ HOÀN THÀNH ---
   const completedCount = useMemo(() => {
     return Object.values(questionProgress).filter((item) => item.solved).length;
   }, [questionProgress]);
 
-  // --- HỆ THỐNG ĐẾM NGƯỢC THỜI GIAN ---
   useEffect(() => {
-    if (!isPlaying || isGameOver || currentProgress.solved) return;
+    if (!isPlaying || isGameOver || currentProgress.solved || isReviewMode) return;
 
     setTimeLeft(timeLimit);
     timerRef.current = setInterval(() => {
@@ -64,9 +74,8 @@ export default function GameModal({ questions, onClose }) {
     }, 1000);
 
     return () => clearInterval(timerRef.current);
-  }, [currentIndex, isPlaying, isGameOver, currentProgress.solved, timeLimit]);
+  }, [currentIndex, isPlaying, isGameOver, currentProgress.solved, timeLimit, isReviewMode]);
 
-  // Khi hết giờ một câu: Chốt là sai
   function handleTimeOut() {
     playSound("wrong");
     setQuestionProgress((prev) => ({
@@ -79,14 +88,13 @@ export default function GameModal({ questions, onClose }) {
     }));
   }
 
-  // BẮT ĐẦU CHƠI (HOẶC CHƠI LẠI)
   function handleStartGame() {
     playSound("click");
     setIsPlaying(true);
     setCurrentIndex(0);
     setIsGameOver(false);
+    setIsReviewMode(false);
 
-    // Khởi tạo progress trống cho tất cả các câu đã được xáo trộn
     const initialProgress = {};
     shuffledQuestions.forEach((_, idx) => {
       initialProgress[idx] = {
@@ -99,34 +107,19 @@ export default function GameModal({ questions, onClose }) {
     setQuestionProgress(initialProgress);
   }
 
-  // CHỌN ĐÁP ÁN
   function handleSelectOption(option) {
     if (isGameOver || currentProgress.solved) return;
     if (currentProgress.selectedWrongs.includes(option)) return;
 
     if (option === currentQuestion.answer) {
-      // ---> CHỌN ĐÚNG
       playSound("correct");
-
       const nextProgress = {
         ...questionProgress,
-        [currentIndex]: {
-          ...currentProgress,
-          solved: true,
-          isCorrect: true,
-        },
+        [currentIndex]: { ...currentProgress, solved: true, isCorrect: true },
       };
-
       setQuestionProgress(nextProgress);
-
-      // Kiểm tra xem đã làm hết tất cả các câu chưa
-      const allSolved = Object.values(nextProgress).every((item) => item.solved);
-      if (allSolved) {
-        playSound("finish");
-        setIsGameOver(true);
-      }
+      checkGameOver(nextProgress);
     } else {
-      // ---> CHỌN SAI
       playSound("wrong");
       const nextWrongCount = currentProgress.wrongCount + 1;
       const isFailedNow = nextWrongCount >= maxWrongAllowed;
@@ -137,25 +130,23 @@ export default function GameModal({ questions, onClose }) {
           ...currentProgress,
           wrongCount: nextWrongCount,
           selectedWrongs: [...currentProgress.selectedWrongs, option],
-          solved: isFailedNow, // Nếu sai vượt quá lượt cho phép thì chốt là sai và khóa câu này lại
+          solved: isFailedNow,
           isCorrect: false,
         },
       };
-
       setQuestionProgress(nextProgress);
-
-      // Nếu câu này sai hết lượt, kiểm tra kết thúc game
-      if (isFailedNow) {
-        const allSolved = Object.values(nextProgress).every((item) => item.solved);
-        if (allSolved) {
-          playSound("finish");
-          setIsGameOver(true);
-        }
-      }
+      if (isFailedNow) checkGameOver(nextProgress);
     }
   }
 
-  // ĐIỀU HƯỚNG CÂU HỎI
+  function checkGameOver(progress) {
+    const allSolved = Object.values(progress).every((item) => item.solved);
+    if (allSolved) {
+      playSound("finish");
+      setIsGameOver(true);
+    }
+  }
+
   function handlePrev() {
     playSound("click");
     setCurrentIndex((prev) => Math.max(0, prev - 1));
@@ -165,22 +156,28 @@ export default function GameModal({ questions, onClose }) {
     playSound("click");
     setCurrentIndex((prev) => Math.min(shuffledQuestions.length - 1, prev + 1));
   }
+  
+  // TÍNH TOÁN LƯỚI GRID CHO ĐẸP DỰA VÀO SỐ LƯỢNG ĐÁP ÁN
+  const gridClass = useMemo(() => {
+    if (optionsCount <= 4) return "grid-cols-2";
+    if (optionsCount <= 6) return "grid-cols-2 md:grid-cols-3";
+    if (optionsCount <= 9) return "grid-cols-3";
+    return "grid-cols-3 md:grid-cols-4";
+  }, [optionsCount]);
 
   return (
-    /* Sử dụng z-[9999] để CHẮC CHẮN đè lên tất cả header của Handsontable Excel */
     <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[9999] flex items-center justify-center p-4 selection:bg-indigo-500 selection:text-white">
-      <div className="bg-white rounded-3xl max-w-4xl w-full p-8 shadow-2xl flex flex-col min-h-[580px] justify-between border border-slate-100 relative overflow-hidden">
+      <div className="bg-white rounded-3xl max-w-4xl w-full p-8 shadow-2xl flex flex-col min-h-[580px] max-h-[90vh] justify-between border border-slate-100 relative overflow-hidden">
         
-        {/* --- MÀN HÌNH CÀI ĐẶT TRƯỚC KHI CHƠI --- */}
         {!isPlaying ? (
           <div className="text-center my-auto max-w-lg mx-auto">
-            <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-indigo-100 shadow-sm">
+             <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-indigo-100 shadow-sm">
               <span className="text-3xl">🎯</span>
             </div>
             <h2 className="text-3xl font-extrabold text-slate-800 mb-2">
               Thử Thách Nối Từ Vựng
             </h2>
-            <p className="text-slate-500 mb-8 text-sm">
+            <p className="text-slate-500 mb-6 text-sm">
               Đã nhận diện <strong className="text-indigo-600 font-bold">{questions.length}</strong> từ vựng hợp lệ trong bảng.
             </p>
 
@@ -211,9 +208,23 @@ export default function GameModal({ questions, onClose }) {
                   onChange={(e) => setMaxWrongAllowed(Math.max(1, Number(e.target.value)))}
                   className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none font-medium"
                 />
-                <p className="text-xs text-slate-400 mt-1">
-                  * Nếu chọn sai quá số lần này hoặc hết giờ, câu hỏi sẽ được tính là sai.
-                </p>
+              </div>
+              
+              {/* TÍNH NĂNG MỚI: Dropdown chọn số lượng đáp án */}
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">
+                  🔠 Số lượng đáp án hiển thị (độ khó):
+                </label>
+                <select
+                  value={optionsCount}
+                  onChange={(e) => setOptionsCount(Number(e.target.value))}
+                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none font-medium cursor-pointer"
+                >
+                  <option value={4}>4 đáp án (Dễ)</option>
+                  <option value={6}>6 đáp án (Vừa)</option>
+                  <option value={9}>9 đáp án (Khó)</option>
+                  <option value={12}>12 đáp án (Cực khó)</option>
+                </select>
               </div>
             </div>
 
@@ -232,8 +243,58 @@ export default function GameModal({ questions, onClose }) {
               </button>
             </div>
           </div>
+        ) : isReviewMode ? (
+          <div className="flex flex-col h-full">
+            <div className="flex justify-between items-center mb-6 border-b pb-4">
+              <h3 className="text-2xl font-extrabold text-slate-800">📋 Chi tiết bài làm</h3>
+              <div className="text-sm font-bold bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-lg border border-indigo-100">
+                Tổng điểm: {correctCount} / {shuffledQuestions.length}
+              </div>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto pr-2 space-y-3 scrollbar-thin scrollbar-thumb-slate-200">
+              {shuffledQuestions.map((q, idx) => {
+                const prog = questionProgress[idx];
+                const isCorrect = prog?.isCorrect;
+                
+                return (
+                  <div key={idx} className={`p-4 rounded-xl border ${isCorrect ? 'bg-green-50/50 border-green-200' : 'bg-red-50/50 border-red-200'} flex flex-col md:flex-row md:items-center justify-between gap-4`}>
+                    <div className="flex items-center gap-4">
+                      <div className={`w-8 h-8 shrink-0 flex items-center justify-center rounded-full font-bold text-white ${isCorrect ? 'bg-green-500' : 'bg-red-500'}`}>
+                        {idx + 1}
+                      </div>
+                      <div>
+                        <div className="text-xl font-bold text-slate-800 mb-1">{q.prompt}</div>
+                        {prog.wrongCount > 0 && !isCorrect && (
+                          <div className="text-sm text-red-500">
+                            Đã chọn sai: {prog.selectedWrongs.join(", ")} {prog.wrongCount >= maxWrongAllowed && "(Hết lượt)"}
+                          </div>
+                        )}
+                        {!prog.isCorrect && prog.wrongCount === 0 && prog.solved && (
+                          <div className="text-sm text-amber-500">Hết thời gian</div>
+                        )}
+                      </div>
+                    </div>
+                    
+                    <div className="bg-white p-3 rounded-lg border border-slate-200 min-w-[200px] text-center shadow-sm">
+                      <div className="text-xs text-slate-400 font-bold uppercase mb-1">Đáp án đúng</div>
+                      <div className="font-semibold text-slate-700">{q.answer}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="mt-6 pt-4 border-t border-slate-100 flex justify-center gap-4">
+              <button
+                onClick={() => setIsReviewMode(false)}
+                className="px-6 py-3 border border-slate-300 rounded-xl text-slate-700 font-semibold hover:bg-slate-100 transition cursor-pointer"
+              >
+                Quay lại tổng kết
+              </button>
+            </div>
+          </div>
         ) : isGameOver ? (
-          /* --- MÀN HÌNH TỔNG KẾT (GAME OVER) --- */
           <div className="text-center my-auto py-8">
             <div className="text-6xl mb-4">🏆</div>
             <h3 className="text-3xl font-extrabold text-slate-800 mb-2">
@@ -243,7 +304,6 @@ export default function GameModal({ questions, onClose }) {
               Bạn đã trả lời xong toàn bộ từ vựng trong danh sách.
             </p>
 
-            {/* Thẻ hiển thị Điểm = Số câu đúng / Tổng số câu */}
             <div className="max-w-xs mx-auto bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-100 rounded-3xl p-6 mb-8 shadow-sm">
               <span className="text-xs uppercase font-bold tracking-wider text-indigo-500 block mb-1">
                 Kết Quả Đúng
@@ -253,26 +313,29 @@ export default function GameModal({ questions, onClose }) {
               </div>
             </div>
 
-            <div className="flex justify-center gap-4">
+            <div className="flex justify-center gap-4 flex-wrap">
               <button
                 onClick={onClose}
                 className="px-6 py-3 border border-slate-300 rounded-xl text-slate-700 font-semibold hover:bg-slate-100 transition cursor-pointer"
               >
-                Quay lại bảng
+                Đóng
+              </button>
+              <button
+                onClick={() => setIsReviewMode(true)}
+                className="px-6 py-3 border border-indigo-200 bg-indigo-50 text-indigo-700 rounded-xl hover:bg-indigo-100 font-semibold transition cursor-pointer"
+              >
+                Xem lại bài làm
               </button>
               <button
                 onClick={handleStartGame}
                 className="px-8 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-bold shadow-md transition cursor-pointer"
               >
-                Chơi lại lần nữa
+                Chơi lại
               </button>
             </div>
           </div>
         ) : (
-          /* --- MÀN HÌNH CHƠI GAME CHÍNH --- */
           <div className="flex flex-col h-full justify-between">
-            
-            {/* 1. Header: Điểm số & Trạng thái câu hiện tại */}
             <div>
               <div className="flex justify-between items-center border-b border-slate-100 pb-4 mb-4">
                 <div className="flex items-center gap-2">
@@ -285,7 +348,6 @@ export default function GameModal({ questions, onClose }) {
                 </div>
 
                 <div className="flex items-center gap-3">
-                  {/* Hiển thị Điểm đơn giản: Đúng / Tổng */}
                   <div className="text-sm font-bold bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-lg border border-indigo-100">
                     ⭐ Đúng: {correctCount} / {shuffledQuestions.length}
                   </div>
@@ -299,9 +361,7 @@ export default function GameModal({ questions, onClose }) {
                 </div>
               </div>
 
-              {/* 2. Thanh điều hướng số câu hỏi (Tối ưu cho cả 1000 câu) */}
               <div className="mb-6">
-                {/* Thanh tiến độ tổng quan (Progress Bar) */}
                 <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden mb-3">
                   <div
                     className="bg-indigo-600 h-full transition-all duration-300"
@@ -309,7 +369,6 @@ export default function GameModal({ questions, onClose }) {
                   />
                 </div>
 
-                {/* Danh sách nút số câu: Dùng max-w và overflow-x-auto để cuộn ngang mượt mà */}
                 <div className="flex gap-1.5 overflow-x-auto pb-2 px-1 max-w-full justify-start md:justify-center scrollbar-thin scrollbar-thumb-slate-200">
                   {shuffledQuestions.map((_, idx) => {
                     const prog = questionProgress[idx] || {};
@@ -317,8 +376,7 @@ export default function GameModal({ questions, onClose }) {
                     let bgStyle = "bg-slate-100 text-slate-600 border-slate-200";
 
                     if (isCurrent) {
-                      bgStyle =
-                        "ring-2 ring-indigo-500 ring-offset-2 bg-white text-indigo-600 font-bold border-indigo-300";
+                      bgStyle = "ring-2 ring-indigo-500 ring-offset-2 bg-white text-indigo-600 font-bold border-indigo-300";
                     } else if (prog.solved) {
                       bgStyle = prog.isCorrect
                         ? "bg-green-100 text-green-700 border-green-300 font-bold"
@@ -342,7 +400,6 @@ export default function GameModal({ questions, onClose }) {
               </div>
             </div>
 
-            {/* 3. Trung tâm: Chữ chính & Bảng đáp án */}
             <div className="my-auto">
               <div className="text-center mb-8">
                 <span className="text-xs uppercase tracking-widest text-slate-400 font-bold block mb-2">
@@ -364,9 +421,9 @@ export default function GameModal({ questions, onClose }) {
                 </div>
               </div>
 
-              {/* Lưới đáp án */}
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 max-h-[240px] overflow-y-auto p-1">
-                {allOptions.map((option, idx) => {
+              {/* LƯỚI ĐÁP ÁN ĐƯỢC TỰ ĐỘNG CANH CHỈNH CSS QUA gridClass */}
+              <div className={`grid ${gridClass} gap-3 max-h-[280px] overflow-y-auto p-1`}>
+                {currentOptions.map((option, idx) => {
                   const isWrong = currentProgress.selectedWrongs.includes(option);
                   const isCorrect = currentProgress.solved && option === currentQuestion.answer;
                   const isDisabled = currentProgress.solved || isWrong;
@@ -386,7 +443,7 @@ export default function GameModal({ questions, onClose }) {
                       key={idx}
                       disabled={isDisabled}
                       onClick={() => handleSelectOption(option)}
-                      className={`p-4 rounded-2xl font-semibold text-base border transition text-center cursor-pointer ${cardStyle}`}
+                      className={`p-4 rounded-2xl font-semibold text-base border transition text-center cursor-pointer flex items-center justify-center min-h-[72px] ${cardStyle}`}
                     >
                       {option}
                     </button>
@@ -395,7 +452,6 @@ export default function GameModal({ questions, onClose }) {
               </div>
             </div>
 
-            {/* 4. Footer: Nút điều hướng Câu trước / Câu tiếp */}
             <div className="flex justify-between items-center border-t border-slate-100 pt-6 mt-6">
               <button
                 onClick={handlePrev}
