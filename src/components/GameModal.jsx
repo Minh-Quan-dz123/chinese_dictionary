@@ -1,5 +1,46 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { playSound } from "../utils/sound";
+
+// ============================================================================
+// 🚀 ĐIỂM TỐI ƯU CỐT LÕI CHỐNG LAG: Tách đồng hồ ra Component riêng
+// Chỉ cái đồng hồ này bị re-render mỗi giây, GameModal sẽ KHÔNG bị re-render
+// ============================================================================
+function CountdownTimer({ active, timeLimit, resetKey, onTimeOut }) {
+  const [timeLeft, setTimeLeft] = useState(timeLimit);
+
+  // Reset lại thời gian khi chuyển qua câu hỏi khác
+  useEffect(() => {
+    setTimeLeft(timeLimit);
+  }, [resetKey, timeLimit]);
+
+  // Bộ đếm 1 giây
+  useEffect(() => {
+    if (!active) return;
+    
+    const timerId = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(timerId);
+          onTimeOut(); // Hết giờ thì gửi tín hiệu báo lên cho GameModal
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timerId);
+  }, [active, onTimeOut]);
+
+  return (
+    <div
+      className={`text-sm font-extrabold px-3 py-1.5 rounded-lg transition-colors ${
+        timeLeft <= 5 ? "bg-red-100 text-red-600 animate-pulse" : "bg-amber-100 text-amber-800"
+      }`}
+    >
+      ⏱️ {timeLeft}s
+    </div>
+  );
+}
 
 export default function GameModal({ questions, onClose }) {
   // --- STATE CÀI ĐẶT ---
@@ -10,13 +51,11 @@ export default function GameModal({ questions, onClose }) {
 
   // --- STATE TRÒ CHƠI ---
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [timeLeft, setTimeLeft] = useState(timeLimit);
   const [isGameOver, setIsGameOver] = useState(false);
   const [isReviewMode, setIsReviewMode] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(100);
 
   const [questionProgress, setQuestionProgress] = useState({});
-  const timerRef = useRef(null);
 
   const shuffledQuestions = useMemo(() => {
     return [...questions].sort(() => Math.random() - 0.5);
@@ -57,36 +96,21 @@ export default function GameModal({ questions, onClose }) {
     return Object.values(questionProgress).filter((item) => item.solved).length;
   }, [questionProgress]);
 
-  // ĐỒNG HỒ ĐẾM NGƯỢC
-  useEffect(() => {
-    if (!isPlaying || isGameOver || currentProgress.solved || isReviewMode) return;
-
-    setTimeLeft(timeLimit);
-    timerRef.current = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          clearInterval(timerRef.current);
-          handleTimeOut();
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(timerRef.current);
-  }, [currentIndex, isPlaying, isGameOver, currentProgress.solved, timeLimit, isReviewMode]);
-
-  function handleTimeOut() {
+  // Xử lý khi Hết giờ: Đóng gói cẩn thận bằng useCallback để không kích hoạt re-render bậy bạ
+  const handleTimeOut = useCallback(() => {
     playSound("wrong");
-    setQuestionProgress((prev) => ({
-      ...prev,
-      [currentIndex]: {
-        ...currentProgress,
-        solved: true,
-        isCorrect: false,
-      },
-    }));
-  }
+    setQuestionProgress((prev) => {
+      const currentProg = prev[currentIndex] || { wrongCount: 0, selectedWrongs: [] };
+      return {
+        ...prev,
+        [currentIndex]: {
+          ...currentProg,
+          solved: true,
+          isCorrect: false,
+        },
+      };
+    });
+  }, [currentIndex]);
 
   function handleStartGame() {
     if (!optionsCount || optionsCount < 2) setOptionsCount(6);
@@ -168,10 +192,7 @@ export default function GameModal({ questions, onClose }) {
     return "grid-cols-4 md:grid-cols-5";
   }, [optionsCount]);
 
-  // =================================================================
-  // ĐIỂM TỐI ƯU HIỆU NĂNG 1: Đóng băng thanh cuộn 1000 nút bấm
-  // Nó sẽ KHÔNG render lại mỗi giây khi đồng hồ đếm ngược nữa
-  // =================================================================
+  // Đóng băng khu vực thanh tiến độ 1000 câu
   const paginationUI = useMemo(() => {
     return (
       <div className="flex gap-1.5 overflow-x-auto pb-2 px-1 max-w-full justify-start md:justify-center scrollbar-thin scrollbar-thumb-slate-200">
@@ -205,9 +226,7 @@ export default function GameModal({ questions, onClose }) {
     );
   }, [shuffledQuestions.length, currentIndex, questionProgress]);
 
-  // =================================================================
-  // ĐIỂM TỐI ƯU HIỆU NĂNG 2: Đóng băng danh sách đáp án
-  // =================================================================
+  // Đóng băng khu vực Đáp án
   const optionsUI = useMemo(() => {
     return (
       <div className={`grid ${gridClass} gap-3 max-h-[300px] overflow-y-auto p-1 scrollbar-thin scrollbar-thumb-slate-200`}>
@@ -240,6 +259,8 @@ export default function GameModal({ questions, onClose }) {
       </div>
     );
   }, [currentOptions, currentProgress, currentQuestion, gridClass]);
+
+  const isTimerActive = isPlaying && !isGameOver && !currentProgress.solved && !isReviewMode;
 
   return (
     <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[9999] flex items-center justify-center p-4 selection:bg-indigo-500 selection:text-white">
@@ -452,17 +473,19 @@ export default function GameModal({ questions, onClose }) {
                 <div className="text-sm font-bold bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-lg border border-indigo-100">
                   ⭐ {correctCount} đ
                 </div>
+                
+                {/* 🚀 ĐẶT COMPONENT ĐỒNG HỒ Ở ĐÂY VÀ TRUYỀN PROPS CHO NÓ */}
                 {!currentProgress.solved && (
-                  <div className={`text-sm font-extrabold px-3 py-1.5 rounded-lg transition-colors ${
-                    timeLeft <= 5 ? "bg-red-100 text-red-600 animate-pulse" : "bg-amber-100 text-amber-800"
-                  }`}>
-                    ⏱️ {timeLeft}s
-                  </div>
+                  <CountdownTimer
+                    active={isTimerActive}
+                    timeLimit={timeLimit}
+                    resetKey={currentIndex}
+                    onTimeOut={handleTimeOut}
+                  />
                 )}
               </div>
             </div>
 
-            {/* Thanh tiến độ UI đã được tối ưu */}
             <div className="mb-6">
               <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden mb-3">
                 <div
@@ -474,7 +497,6 @@ export default function GameModal({ questions, onClose }) {
               {paginationUI} 
             </div>
 
-            {/* Vùng GAME PLAY CHÍNH ĐƯỢC ZOOM */}
             <div className="my-auto transition-transform origin-top" style={{ zoom: `${zoomLevel}%` }}>
               <div className="text-center mb-8">
                 <span className="text-xs uppercase tracking-widest text-slate-400 font-bold block mb-2">
@@ -499,7 +521,6 @@ export default function GameModal({ questions, onClose }) {
               {optionsUI}
             </div>
 
-            {/* Footer */}
             <div className="flex justify-between items-center border-t border-slate-100 pt-6 mt-6 shrink-0">
               <button
                 onClick={handlePrev}
