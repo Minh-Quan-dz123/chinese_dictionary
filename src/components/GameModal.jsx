@@ -7,7 +7,7 @@ export default function GameModal({ questions, onClose }) {
   const [timeLimit, setTimeLimit] = useState(30); 
   const [maxWrongAllowed, setMaxWrongAllowed] = useState(1); 
   
-  // TÍNH NĂNG MỚI: Tùy chỉnh số lượng đáp án hiển thị (mặc định là 6)
+  // YÊU CẦU 1: Số lượng đáp án hiển thị (Người dùng có thể nhập tùy ý)
   const [optionsCount, setOptionsCount] = useState(6);
 
   // --- STATE TRÒ CHƠI (GAMEPLAY) ---
@@ -15,6 +15,9 @@ export default function GameModal({ questions, onClose }) {
   const [timeLeft, setTimeLeft] = useState(timeLimit);
   const [isGameOver, setIsGameOver] = useState(false);
   const [isReviewMode, setIsReviewMode] = useState(false);
+
+  // YÊU CẦU 3: State Zoom mức độ hiển thị (%)
+  const [zoomLevel, setZoomLevel] = useState(100);
 
   const [questionProgress, setQuestionProgress] = useState({});
   const timerRef = useRef(null);
@@ -25,7 +28,6 @@ export default function GameModal({ questions, onClose }) {
 
   const currentQuestion = shuffledQuestions[currentIndex];
 
-  // LOGIC ĐÁP ÁN: Tạo động theo số lượng user cấu hình
   const currentOptions = useMemo(() => {
     if (!currentQuestion) return [];
     
@@ -35,10 +37,12 @@ export default function GameModal({ questions, onClose }) {
       .map(q => q.answer)
       .filter(ans => ans !== correctAnswer);
 
-    // Lấy số đáp án sai bằng tổng số lượng cấu hình trừ đi 1 (đáp án đúng)
+    // Dùng số lượng user nhập (nếu bỏ trống hoặc nhập vớ vẩn thì mặc định là 6)
+    const validCount = Math.max(2, Number(optionsCount) || 6);
+
     const selectedWrongs = allWrongAnswers
       .sort(() => Math.random() - 0.5)
-      .slice(0, optionsCount - 1);
+      .slice(0, validCount - 1);
 
     return [correctAnswer, ...selectedWrongs].sort(() => Math.random() - 0.5);
   }, [currentQuestion, questions, optionsCount]);
@@ -89,11 +93,15 @@ export default function GameModal({ questions, onClose }) {
   }
 
   function handleStartGame() {
+    // Đảm bảo optionsCount hợp lệ trước khi vào game
+    if (!optionsCount || optionsCount < 2) setOptionsCount(6);
+
     playSound("click");
     setIsPlaying(true);
     setCurrentIndex(0);
     setIsGameOver(false);
     setIsReviewMode(false);
+    setZoomLevel(100); // Reset zoom khi chơi mới
 
     const initialProgress = {};
     shuffledQuestions.forEach((_, idx) => {
@@ -157,17 +165,19 @@ export default function GameModal({ questions, onClose }) {
     setCurrentIndex((prev) => Math.min(shuffledQuestions.length - 1, prev + 1));
   }
   
-  // TÍNH TOÁN LƯỚI GRID CHO ĐẸP DỰA VÀO SỐ LƯỢNG ĐÁP ÁN
   const gridClass = useMemo(() => {
-    if (optionsCount <= 4) return "grid-cols-2";
-    if (optionsCount <= 6) return "grid-cols-2 md:grid-cols-3";
-    if (optionsCount <= 9) return "grid-cols-3";
-    return "grid-cols-3 md:grid-cols-4";
+    const count = Number(optionsCount) || 6;
+    if (count <= 4) return "grid-cols-2";
+    if (count <= 6) return "grid-cols-2 md:grid-cols-3";
+    if (count <= 9) return "grid-cols-3";
+    if (count <= 12) return "grid-cols-3 md:grid-cols-4";
+    return "grid-cols-4 md:grid-cols-5"; // Hỗ trợ nếu user nhập số to hơn 12
   }, [optionsCount]);
 
   return (
     <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[9999] flex items-center justify-center p-4 selection:bg-indigo-500 selection:text-white">
-      <div className="bg-white rounded-3xl max-w-4xl w-full p-8 shadow-2xl flex flex-col min-h-[580px] max-h-[90vh] justify-between border border-slate-100 relative overflow-hidden">
+      {/* YÊU CẦU 2: Đổi overflow-hidden thành overflow-y-auto và scrollbar-thin để modal cuộn mượt */}
+      <div className="bg-white rounded-3xl max-w-4xl w-full p-6 md:p-8 shadow-2xl flex flex-col min-h-[580px] max-h-[90vh] justify-between border border-slate-100 relative overflow-y-auto scrollbar-thin scrollbar-thumb-slate-200">
         
         {!isPlaying ? (
           <div className="text-center my-auto max-w-lg mx-auto">
@@ -210,21 +220,29 @@ export default function GameModal({ questions, onClose }) {
                 />
               </div>
               
-              {/* TÍNH NĂNG MỚI: Dropdown chọn số lượng đáp án */}
+              {/* YÊU CẦU 1: Kết hợp input number với datalist để user tự nhập + gợi ý */}
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1">
-                  🔠 Số lượng đáp án hiển thị (độ khó):
+                  🔠 Số lượng đáp án hiển thị:
                 </label>
-                <select
+                <input
+                  type="number"
+                  min={2}
+                  list="options-presets"
                   value={optionsCount}
-                  onChange={(e) => setOptionsCount(Number(e.target.value))}
-                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none font-medium cursor-pointer"
-                >
-                  <option value={4}>4 đáp án (Dễ)</option>
-                  <option value={6}>6 đáp án (Vừa)</option>
-                  <option value={9}>9 đáp án (Khó)</option>
-                  <option value={12}>12 đáp án (Cực khó)</option>
-                </select>
+                  onChange={(e) => setOptionsCount(e.target.value)}
+                  placeholder="Gõ số lượng (vd: 3, 5, 8...)"
+                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none font-medium"
+                />
+                <datalist id="options-presets">
+                  <option value="4">4 đáp án (Dễ)</option>
+                  <option value="6">6 đáp án (Vừa)</option>
+                  <option value="9">9 đáp án (Khó)</option>
+                  <option value="12">12 đáp án (Cực khó)</option>
+                </datalist>
+                <p className="text-xs text-slate-400 mt-1">
+                  * Có thể tự gõ số bất kỳ hoặc chọn từ danh sách gợi ý.
+                </p>
               </div>
             </div>
 
@@ -336,71 +354,91 @@ export default function GameModal({ questions, onClose }) {
           </div>
         ) : (
           <div className="flex flex-col h-full justify-between">
-            <div>
-              <div className="flex justify-between items-center border-b border-slate-100 pb-4 mb-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-bold text-slate-700 bg-slate-100 px-3 py-1.5 rounded-lg">
-                    Câu {currentIndex + 1} / {shuffledQuestions.length}
-                  </span>
-                  <span className="text-sm font-semibold text-slate-500">
-                    Đã xong: {completedCount}/{shuffledQuestions.length}
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-3">
-                  <div className="text-sm font-bold bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-lg border border-indigo-100">
-                    ⭐ Đúng: {correctCount} / {shuffledQuestions.length}
-                  </div>
-                  {!currentProgress.solved && (
-                    <div className={`text-sm font-extrabold px-3 py-1.5 rounded-lg transition-colors ${
-                      timeLeft <= 5 ? "bg-red-100 text-red-600 animate-pulse" : "bg-amber-100 text-amber-800"
-                    }`}>
-                      ⏱️ {timeLeft}s
-                    </div>
-                  )}
-                </div>
+            {/* Header Toolbar */}
+            <div className="flex justify-between items-center border-b border-slate-100 pb-4 mb-4 flex-wrap gap-y-3">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-bold text-slate-700 bg-slate-100 px-3 py-1.5 rounded-lg">
+                  Câu {currentIndex + 1} / {shuffledQuestions.length}
+                </span>
+                <span className="text-sm font-semibold text-slate-500 hidden sm:inline">
+                  Đã xong: {completedCount}/{shuffledQuestions.length}
+                </span>
               </div>
 
-              <div className="mb-6">
-                <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden mb-3">
-                  <div
-                    className="bg-indigo-600 h-full transition-all duration-300"
-                    style={{ width: `${(completedCount / shuffledQuestions.length) * 100}%` }}
-                  />
+              <div className="flex items-center gap-3">
+                {/* YÊU CẦU 3: Cụm điều khiển Zoom */}
+                <div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg px-2 py-1">
+                  <span className="text-xs text-slate-500 font-bold mr-1">🔍</span>
+                  <select 
+                    value={zoomLevel} 
+                    onChange={(e) => setZoomLevel(Number(e.target.value))}
+                    className="text-xs font-bold bg-transparent text-slate-700 border-none outline-none cursor-pointer"
+                  >
+                    <option value={25}>25%</option>
+                    <option value={50}>50%</option>
+                    <option value={75}>75%</option>
+                    <option value={100}>100%</option>
+                    <option value={125}>125%</option>
+                    <option value={150}>150%</option>
+                    <option value={175}>175%</option>
+                    <option value={200}>200%</option>
+                  </select>
                 </div>
 
-                <div className="flex gap-1.5 overflow-x-auto pb-2 px-1 max-w-full justify-start md:justify-center scrollbar-thin scrollbar-thumb-slate-200">
-                  {shuffledQuestions.map((_, idx) => {
-                    const prog = questionProgress[idx] || {};
-                    const isCurrent = idx === currentIndex;
-                    let bgStyle = "bg-slate-100 text-slate-600 border-slate-200";
-
-                    if (isCurrent) {
-                      bgStyle = "ring-2 ring-indigo-500 ring-offset-2 bg-white text-indigo-600 font-bold border-indigo-300";
-                    } else if (prog.solved) {
-                      bgStyle = prog.isCorrect
-                        ? "bg-green-100 text-green-700 border-green-300 font-bold"
-                        : "bg-red-100 text-red-700 border-red-300 font-bold";
-                    }
-
-                    return (
-                      <button
-                        key={idx}
-                        onClick={() => {
-                          playSound("click");
-                          setCurrentIndex(idx);
-                        }}
-                        className={`w-9 h-9 rounded-xl border text-xs shrink-0 flex items-center justify-center transition cursor-pointer ${bgStyle}`}
-                      >
-                        {idx + 1}
-                      </button>
-                    );
-                  })}
+                <div className="text-sm font-bold bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-lg border border-indigo-100">
+                  ⭐ {correctCount} đ
                 </div>
+                {!currentProgress.solved && (
+                  <div className={`text-sm font-extrabold px-3 py-1.5 rounded-lg transition-colors ${
+                    timeLeft <= 5 ? "bg-red-100 text-red-600 animate-pulse" : "bg-amber-100 text-amber-800"
+                  }`}>
+                    ⏱️ {timeLeft}s
+                  </div>
+                )}
               </div>
             </div>
 
-            <div className="my-auto">
+            {/* Thanh tiến độ */}
+            <div className="mb-6">
+              <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden mb-3">
+                <div
+                  className="bg-indigo-600 h-full transition-all duration-300"
+                  style={{ width: `${(completedCount / shuffledQuestions.length) * 100}%` }}
+                />
+              </div>
+
+              <div className="flex gap-1.5 overflow-x-auto pb-2 px-1 max-w-full justify-start md:justify-center scrollbar-thin scrollbar-thumb-slate-200">
+                {shuffledQuestions.map((_, idx) => {
+                  const prog = questionProgress[idx] || {};
+                  const isCurrent = idx === currentIndex;
+                  let bgStyle = "bg-slate-100 text-slate-600 border-slate-200";
+
+                  if (isCurrent) {
+                    bgStyle = "ring-2 ring-indigo-500 ring-offset-2 bg-white text-indigo-600 font-bold border-indigo-300";
+                  } else if (prog.solved) {
+                    bgStyle = prog.isCorrect
+                      ? "bg-green-100 text-green-700 border-green-300 font-bold"
+                      : "bg-red-100 text-red-700 border-red-300 font-bold";
+                  }
+
+                  return (
+                    <button
+                      key={idx}
+                      onClick={() => {
+                        playSound("click");
+                        setCurrentIndex(idx);
+                      }}
+                      className={`w-9 h-9 rounded-xl border text-xs shrink-0 flex items-center justify-center transition cursor-pointer ${bgStyle}`}
+                    >
+                      {idx + 1}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Vùng GAME PLAY CHÍNH ĐƯỢC ZOOM */}
+            <div className="my-auto transition-transform origin-top" style={{ zoom: `${zoomLevel}%` }}>
               <div className="text-center mb-8">
                 <span className="text-xs uppercase tracking-widest text-slate-400 font-bold block mb-2">
                   {currentProgress.solved
@@ -421,8 +459,7 @@ export default function GameModal({ questions, onClose }) {
                 </div>
               </div>
 
-              {/* LƯỚI ĐÁP ÁN ĐƯỢC TỰ ĐỘNG CANH CHỈNH CSS QUA gridClass */}
-              <div className={`grid ${gridClass} gap-3 max-h-[280px] overflow-y-auto p-1`}>
+              <div className={`grid ${gridClass} gap-3 max-h-[300px] overflow-y-auto p-1 scrollbar-thin scrollbar-thumb-slate-200`}>
                 {currentOptions.map((option, idx) => {
                   const isWrong = currentProgress.selectedWrongs.includes(option);
                   const isCorrect = currentProgress.solved && option === currentQuestion.answer;
@@ -452,18 +489,19 @@ export default function GameModal({ questions, onClose }) {
               </div>
             </div>
 
-            <div className="flex justify-between items-center border-t border-slate-100 pt-6 mt-6">
+            {/* Footer */}
+            <div className="flex justify-between items-center border-t border-slate-100 pt-6 mt-6 shrink-0">
               <button
                 onClick={handlePrev}
                 disabled={currentIndex === 0}
                 className="px-5 py-2.5 rounded-xl border border-slate-300 text-slate-700 font-semibold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 transition cursor-pointer"
               >
-                ⬅ Câu trước
+                ⬅ <span className="hidden sm:inline">Câu trước</span>
               </button>
 
               <button
                 onClick={onClose}
-                className="text-sm font-semibold text-slate-400 hover:text-slate-600 transition cursor-pointer"
+                className="px-4 py-2 text-sm font-semibold text-slate-400 hover:text-slate-600 transition cursor-pointer bg-slate-100 rounded-lg"
               >
                 Dừng & Thoát
               </button>
@@ -473,7 +511,7 @@ export default function GameModal({ questions, onClose }) {
                 disabled={currentIndex === shuffledQuestions.length - 1}
                 className="px-5 py-2.5 rounded-xl bg-slate-800 text-white font-semibold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-900 transition cursor-pointer"
               >
-                Câu tiếp ➡
+                <span className="hidden sm:inline">Câu tiếp</span> ➡
               </button>
             </div>
           </div>
