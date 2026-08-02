@@ -216,6 +216,11 @@ function Spreadsheet() {
           afterChange={handleAfterChange}
           columns={tableColumns}
           licenseKey="non-commercial-and-evaluation"
+
+          autoRowSize={false}       // TẮT đo đạc chiều cao tự động (Sát thủ gây lag)
+          autoColumnSize={false}    // TẮT đo đạc chiều rộng tự động
+          rowHeights={48}           // Set cứng chiều cao dòng (48px vừa khít chữ text-lg)
+          viewportRowRenderingOffset={5} // Chỉ render hờ 5 dòng trước/sau khi cuộn (giảm từ 20 xuống)
         />
       </div>
 
