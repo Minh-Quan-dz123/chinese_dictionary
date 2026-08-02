@@ -17,25 +17,27 @@ registerAllModules();
 function Spreadsheet() {
   const hotRef = useRef(null);
 
-  // Xóa cột STT -> Mỗi dòng giờ chỉ còn 3 phần tử: [Chinese, Pinyin, Meaning]
   function createRows(count = 20) {
     return Array.from({ length: count }, () => ["", "", ""]);
   }
 
   const [tableData, setTableData] = useState(createRows());
 
+  // --- CẬP NHẬT: Dùng alter() của Handsontable để thêm/xóa dòng an toàn hơn ---
   function addRow(count = 10) {
-    setTableData((old) => {
-      const newRows = Array.from({ length: count }, () => ["", "", ""]);
-      return [...old, ...newRows];
-    });
+    const hot = hotRef.current?.hotInstance;
+    if (hot) {
+      // Chèn 'count' dòng vào vị trí dưới cùng
+      hot.alter('insert_row_below', hot.countRows(), count);
+    }
   }
 
   function deleteRow() {
-    setTableData((old) => {
-      if (old.length <= 1) return old;
-      return old.slice(0, -1);
-    });
+    const hot = hotRef.current?.hotInstance;
+    if (hot && hot.countRows() > 1) {
+      // Xóa 1 dòng ở vị trí cuối cùng
+      hot.alter('remove_row', hot.countRows() - 1, 1);
+    }
   }
 
   function undo() {
@@ -57,7 +59,6 @@ function Spreadsheet() {
     });
   }
 
-  // Hook xử lý khi người dùng gõ/paste vào bảng
   const handleAfterChange = useCallback((changes, source) => {
     if (!changes || source === "loadData" || source === "dictionaryAutoFill")
       return;
@@ -68,14 +69,13 @@ function Spreadsheet() {
     const updates = [];
 
     changes.forEach(([row, col, oldVal, newVal]) => {
-      // Index cột 0 là "Chinese (Giản thể)"
       if (col === 0 && newVal !== oldVal) {
         if (!newVal || String(newVal).trim() === "") {
-          updates.push([row, 1, ""]); // Xóa Pinyin (cột 1) khi xóa chữ Hán
+          updates.push([row, 1, ""]); 
         } else {
           const result = lookup(String(newVal));
           if (result) {
-            updates.push([row, 1, result.pinyin]); // Chỉ tự động cập nhật Pinyin (cột 1)
+            updates.push([row, 1, result.pinyin]); 
           }
         }
       }
@@ -86,10 +86,8 @@ function Spreadsheet() {
     }
   }, []);
 
-  // Renderer cho Pinyin (Tô màu theo thanh điệu bằng HTML)
   function pinyinHTMLRenderer(instance, td, row, col, prop, value, cellProperties) {
     td.innerHTML = "";
-    // Lấy chữ Hán ở cột 0
     const chineseWord = instance.getDataAtCell(row, 0);
     const rawEntry = dictionary.get(String(chineseWord).trim());
 
@@ -102,20 +100,15 @@ function Spreadsheet() {
     return td;
   }
 
-  // 2. Thêm state quản lý Game Modal & Danh sách câu hỏi
   const [isGameOpen, setIsGameOpen] = useState(false);
   const [gameQuestions, setGameQuestions] = useState([]);
 
-  // 3. Hàm kích hoạt nút Play Game
   function handleOpenGame() {
     const hot = hotRef.current?.hotInstance;
-    
-    // Bắt buộc bỏ chọn ô hiện tại để Handsontable LƯU NGAY chữ mày vừa gõ
     if (hot) {
       hot.deselectCell();
     }
 
-    // Lấy dữ liệu mới nhất sau khi đã lưu ô
     const currentData = hot ? hot.getData() : tableData;
     const questions = parseGameData(currentData);
 
@@ -128,6 +121,27 @@ function Spreadsheet() {
     setIsGameOpen(true);
   }
 
+  // --- TÍNH NĂNG MỚI 1: Menu chuột phải (Context Menu) tiếng Việt ---
+  const contextMenuSettings = {
+    items: {
+      row_above: { name: "⬆️ Chèn 1 dòng lên trên" },
+      row_below: { name: "⬇️ Chèn 1 dòng xuống dưới" },
+      remove_row: { name: "❌ Xóa dòng hiện tại" },
+      hsep1: "---------",
+      copy: { name: "📋 Sao chép (Copy)" },
+      cut: { name: "✂️ Cắt (Cut)" },
+      undo: { name: "↩️ Hoàn tác (Undo)" },
+      redo: { name: "↪️ Làm lại (Redo)" },
+      hsep2: "---------",
+      clear_custom: {
+        name: "🧹 Xóa nội dung ô (Clear)",
+        callback: function () {
+          this.emptySelectedCells();
+        }
+      }
+    }
+  };
+
   return (
     <div className="bg-white rounded-xl shadow-md p-6 border border-gray-100">
       <Toolbar
@@ -137,7 +151,7 @@ function Spreadsheet() {
         redo={redo}
         exportExcel={handleExport}
         importExcel={handleImport}
-        onPlayGame={handleOpenGame} // <-- 4. Truyền prop xuống Toolbar
+        onPlayGame={handleOpenGame} 
       />
 
       <div className="border border-gray-300 rounded overflow-hidden">
@@ -145,11 +159,23 @@ function Spreadsheet() {
           ref={hotRef}
           data={tableData}
           colHeaders={["Chinese (Giản thể)", "Pinyin", "Nghĩa tiếng Việt"]}
-          rowHeaders={true} // Vẫn giữ số thứ tự dòng mặc định của bảng
+          rowHeaders={true} 
           width="100%"
           height="600"
           stretchH="all"
-          contextMenu={true}
+          
+          // --- Bật Menu chuột phải ---
+          contextMenu={contextMenuSettings}
+          
+          // --- TÍNH NĂNG MỚI 2 & 3: Kéo cuộn & Paste tự đẻ dòng ---
+          allowInsertRow={true}     // Paste 100 dòng sẽ tự động chèn thêm 100 dòng
+          allowInsertColumn={false} // Khóa cột lại, giữ nguyên đúng 3 cột
+          
+          fillHandle={{
+            autoInsertRow: true,    // Kéo ô vuông xuống dưới cùng sẽ tự sinh dòng mới
+          }}
+          viewportRowRenderingOffset={20} // Render trước 20 dòng để khi kéo scroll nó mượt, ko bị khựng
+          
           copyPaste={true}
           manualRowResize={true}
           manualColumnResize={true}
@@ -175,7 +201,6 @@ function Spreadsheet() {
         />
       </div>
 
-      {/* 5. Hiển thị GameModal khi bật */}
       {isGameOpen && (
         <GameModal
           questions={gameQuestions}
