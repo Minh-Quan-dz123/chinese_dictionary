@@ -1,15 +1,22 @@
-// Khởi tạo dữ liệu mặc định nếu người dùng mới vào web lần đầu
+// src/store/db.js
+
+export const DRAFT_TOPIC_ID = "t_draft";
+
 const DEFAULT_DB = {
-  topics: [{ id: "t_default", name: "Chưa phân loại" }],
+  topics: [{ id: DRAFT_TOPIC_ID, name: "Bản nháp (Chưa lưu)" }],
   words: []
 };
 
-// Lấy dữ liệu từ bộ nhớ
 export function getDB() {
   const data = localStorage.getItem("vocab_master_db");
   if (data) {
     try {
-      return JSON.parse(data);
+      const parsed = JSON.parse(data);
+      // Đảm bảo luôn tồn tại chủ đề Bản nháp nếu lỡ bị xóa
+      if (!parsed.topics.find(t => t.id === DRAFT_TOPIC_ID)) {
+        parsed.topics.unshift({ id: DRAFT_TOPIC_ID, name: "Bản nháp (Chưa lưu)" });
+      }
+      return parsed;
     } catch (e) {
       console.error("Lỗi parse DB", e);
     }
@@ -17,12 +24,10 @@ export function getDB() {
   return DEFAULT_DB;
 }
 
-// Lưu dữ liệu vào bộ nhớ
 export function saveDB(data) {
   localStorage.setItem("vocab_master_db", JSON.stringify(data));
 }
 
-// Hàm tạo ID ngẫu nhiên không trùng lặp
 export function generateId(prefix) {
   return prefix + "_" + Date.now() + Math.random().toString(36).substr(2, 5);
 }
