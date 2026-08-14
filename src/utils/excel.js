@@ -1,13 +1,14 @@
 import * as XLSX from "xlsx";
 
 export function exportExcel(data) {
-  // Bỏ cột STT trong tiêu đề file Excel
-  const headers = [["Chinese", "Pinyin", "Meaning"]];
+  // Thêm cột Chủ đề vào file xuất ra
+  const headers = [["Chinese", "Pinyin", "Meaning", "Topic"]];
   
   const rows = data.map((row) => [
-    row[0] || "",
-    row[1] || "",
-    row[2] || "",
+    row.zh || "",
+    row.py || "",
+    row.vi || "",
+    row.topicName || ""
   ]);
 
   const worksheet = XLSX.utils.aoa_to_sheet([...headers, ...rows]);
@@ -29,15 +30,16 @@ export function importExcel(file, onCompleted) {
     // Read thành mảng 2 chiều
     const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
-    // Bỏ dòng Header nếu có và format lại đủ 3 cột
+    // Ép kiểu mảng 2 chiều về dạng Object để Handsontable đọc được
     const formattedData = jsonData
       .slice(1)
       .filter((row) => row.some((cell) => cell !== "" && cell !== undefined))
-      .map((row) => [
-        row[0] ? String(row[0]) : "",
-        row[1] ? String(row[1]) : "",
-        row[2] ? String(row[2]) : "",
-      ]);
+      .map((row) => ({
+        zh: row[0] ? String(row[0]) : "",
+        py: row[1] ? String(row[1]) : "",
+        vi: row[2] ? String(row[2]) : "",
+        topicName: row[3] ? String(row[3]) : "", // Load lại chủ đề nếu có
+      }));
 
     if (onCompleted && formattedData.length > 0) {
       onCompleted(formattedData);

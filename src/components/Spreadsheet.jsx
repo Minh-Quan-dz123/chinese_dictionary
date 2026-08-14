@@ -1,4 +1,3 @@
-// src/components/Spreadsheet.jsx
 import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import { HotTable } from "@handsontable/react-wrapper";
 import { registerAllModules } from "handsontable/registry";
@@ -12,33 +11,44 @@ import { getDB, saveDB, generateId, DRAFT_TOPIC_ID } from "../store/db";
 import { exportExcel, importExcel } from "../utils/excel";
 import { parseGameData } from "../utils/gameParser";
 
+import dictionary from "../dictionary/dictionary";
+import { renderToneColorHTML } from "../utils/tone";
+
 registerAllModules();
+
+const pinyinCache = new Map();
 
 export default function Spreadsheet({ activeTopicIds, onBack }) {
   const hotRef = useRef(null);
   const saveTimeoutRef = useRef(null);
 
-  // --- STATE ---
-  const [db, setDb] = useState({ topics: [], words: [] });
-  const [tableData, setTableData] = useState([]);
-  const [zoomLevel, setZoomLevel] = useState(100);
-  
-  const [showDraftModal, setShowDraftModal] = useState(false);
-  const [draftTopicName, setDraftTopicName] = useState("");
-
-  const [isGameOpen, setIsGameOpen] = useState(false);
-  const [gameQuestions, setGameQuestions] = useState([]);
-
-  // 1. TẢI DỮ LIỆU KHI MỞ BẢNG
-  useEffect(() => {
+  // KHỞI TẠO DỮ LIỆU NGAY TỪ ĐẦU (Chống lỗi trắng bảng)
+  const [tableData, setTableData] = useState(() => {
     const currentDb = getDB();
-    setDb(currentDb);
-
     let filteredWords = [];
     if (activeTopicIds && activeTopicIds.length > 0) {
       filteredWords = currentDb.words.filter(w => activeTopicIds.includes(w.topicId));
     }
+    if (filteredWords.length === 0) {
+      return Array.from({ length: 20 }, () => ({ id: generateId("w"), zh: "", py: "", vi: "", topicName: "" }));
+    }
+    return filteredWords.map(w => ({ ...w, topicName: currentDb.topics.find(t => t.id === w.topicId)?.name || "" }));
+  });
 
+  const [db, setDb] = useState(getDB);
+  const [zoomLevel, setZoomLevel] = useState(100);
+  const [showDraftModal, setShowDraftModal] = useState(false);
+  const [draftTopicName, setDraftTopicName] = useState("");
+  const [isGameOpen, setIsGameOpen] = useState(false);
+  const [gameQuestions, setGameQuestions] = useState([]);
+
+  // Load lại khi người dùng đổi chủ đề
+  useEffect(() => {
+    const currentDb = getDB();
+    let filteredWords = [];
+    if (activeTopicIds && activeTopicIds.length > 0) {
+      filteredWords = currentDb.words.filter(w => activeTopicIds.includes(w.topicId));
+    }
     if (filteredWords.length === 0) {
       setTableData(Array.from({ length: 20 }, () => ({ id: generateId("w"), zh: "", py: "", vi: "", topicName: "" })));
     } else {
@@ -46,19 +56,16 @@ export default function Spreadsheet({ activeTopicIds, onBack }) {
     }
   }, [activeTopicIds]);
 
-  // 2. HÀM THỰC THI ĐỒNG BỘ DỮ LIỆU (Lưu Tức Thì)
   const performSync = useCallback(() => {
     const hot = hotRef.current?.hotInstance;
     if (!hot) return;
-
     const currentTableData = hot.getSourceData();
     const currentDb = getDB(); 
     let updatedTopics = [...currentDb.topics];
     let updatedWords = [...currentDb.words];
 
     currentTableData.forEach(row => {
-      if (!row.zh && !row.py && !row.vi) return; // Bỏ qua dòng trống
-
+      if (!row.zh && !row.py && !row.vi) return;
       let finalTopicId = DRAFT_TOPIC_ID; 
 
       if (row.topicName && String(row.topicName).trim() !== "") {
@@ -69,13 +76,8 @@ export default function Spreadsheet({ activeTopicIds, onBack }) {
         }
         finalTopicId = matchedTopic.id;
       }
-
       const wordPayload = {
-        id: row.id || generateId("w"), 
-        zh: row.zh || "", 
-        py: row.py || "", 
-        vi: row.vi || "", 
-        topicId: finalTopicId
+        id: row.id || generateId("w"), zh: row.zh || "", py: row.py || "", vi: row.vi || "", topicId: finalTopicId
       };
 
       const existingIdx = updatedWords.findIndex(w => w.id === row.id);
@@ -87,15 +89,11 @@ export default function Spreadsheet({ activeTopicIds, onBack }) {
     setDb({ topics: updatedTopics, words: updatedWords });
   }, []);
 
-  // 2.1 HÀM HẸN GIỜ ĐỒNG BỘ (Chống lag khi đang gõ chữ)
   const syncToDatabaseDebounced = useCallback(() => {
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    saveTimeoutRef.current = setTimeout(() => {
-      performSync();
-    }, 1000); 
+    saveTimeoutRef.current = setTimeout(() => performSync(), 1000); 
   }, [performSync]);
 
-  // 3. AUTO FILL THÔNG MINH
   const handleAfterChange = useCallback((changes, source) => {
     if (!changes || source === "loadData" || source === "dictionaryAutoFill") return;
     const hot = hotRef.current?.hotInstance;
@@ -122,18 +120,57 @@ export default function Spreadsheet({ activeTopicIds, onBack }) {
     syncToDatabaseDebounced();
   }, [syncToDatabaseDebounced]);
 
-  // --- CÁC HÀM XỬ LÝ ROW AN TOÀN ---
+  // KHÔI PHỤC RENDERER TÔ MÀU THANH ĐIỆU
+  const pinyinHTMLRenderer = useCallback((instance, td, row, col, prop, value, cellProperties) => {
+    td.className = "htCenter htMiddle";
+    if (!value) { td.innerHTML = ""; return td; }
+
+    const chineseWord = instance.getDataAtRowProp(row, "zh");
+    const cacheKey = `${chineseWord}_${value}`;
+
+    if (pinyinCache.has(cacheKey)) {
+      td.innerHTML = pinyinCache.get(cacheKey);
+      return td;
+    }
+
+    const rawEntry = dictionary.get(String(chineseWord).trim());
+    let generatedHTML = value; 
+    if (rawEntry && rawEntry.p) {
+      generatedHTML = renderToneColorHTML(rawEntry.p, value);
+      pinyinCache.set(cacheKey, generatedHTML);
+    } 
+    td.innerHTML = generatedHTML;
+    return td;
+  }, []);
+
+  // CỐ ĐỊNH REFERENCE CHO CỘT (Chống lỗi crash)
+  const tableColumns = useMemo(() => [
+    { data: "zh", type: "text", width: 160, className: "htLarge font-medium text-lg htMiddle" },
+    { data: "py", renderer: pinyinHTMLRenderer, width: 200 },
+    { data: "vi", type: "text", width: 350, className: "htMiddle" },
+    { 
+      data: "topicName", 
+      type: "dropdown", 
+      // TRICK CHỐNG CRASH: Dùng function thay vì truyền trực tiếp mảng db.topics
+      source: function(query, process) {
+         const currentDb = getDB();
+         const names = currentDb.topics.filter(t => t.id !== DRAFT_TOPIC_ID).map(t => t.name);
+         process(names);
+      }, 
+      width: 180, 
+      className: "htMiddle text-slate-500 font-bold" 
+    }
+  ], [pinyinHTMLRenderer]);
+
   const handleAddRow = (n) => {
     const hot = hotRef.current?.hotInstance;
     if (hot) hot.alter('insert_row_below', hot.countRows(), n);
   };
-
   const handleDeleteRow = () => {
     const hot = hotRef.current?.hotInstance;
     if (hot && hot.countRows() > 0) hot.alter('remove_row', hot.countRows() - 1, 1);
   };
 
-  // --- HÀM QUẢN LÝ EXCEL & GAME TẠI BẢNG ---
   function handleExport() {
     const hot = hotRef.current?.hotInstance;
     if (hot) exportExcel(hot.getSourceData());
@@ -150,35 +187,21 @@ export default function Spreadsheet({ activeTopicIds, onBack }) {
   function handleOpenGame() {
     const hot = hotRef.current?.hotInstance;
     if (hot) hot.deselectCell();
-    
     const currentData = hot ? hot.getSourceData() : tableData;
     const questions = parseGameData(currentData);
-
-    if (questions.length === 0) {
-      alert("Không tìm thấy từ vựng hợp lệ! Hãy điền Tiếng Trung và Nghĩa.");
-      return;
-    }
+    if (questions.length === 0) { alert("Không tìm thấy từ vựng hợp lệ!"); return; }
     setGameQuestions(questions);
     setIsGameOpen(true);
   }
 
-  // --- XỬ LÝ QUAY LẠI (KIỂM TRA HỖN ĐỘN - LƯU TỨC THÌ) ---
   const handleIntentionalExit = () => {
-    // 1. Hủy bỏ đếm ngược chống lag
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    
-    // 2. Ép hệ thống lưu ngay lập tức (Instant Save)
     performSync(); 
     
-    // 3. Kiểm tra xem có từ nào vừa chui vào Bản nháp không
     const freshDb = getDB();
     const hasDraftWords = freshDb.words.some(w => w.topicId === DRAFT_TOPIC_ID);
-
-    if (hasDraftWords) {
-      setShowDraftModal(true); 
-    } else {
-      onBack(); 
-    }
+    if (hasDraftWords) setShowDraftModal(true); 
+    else onBack(); 
   };
 
   const handleResolveDraft = (action) => {
@@ -200,18 +223,14 @@ export default function Spreadsheet({ activeTopicIds, onBack }) {
     onBack();
   };
 
-  // --- THÊM CHỦ ĐỀ VÀO BẢNG ---
   const handleLoadMoreTopic = (topicId) => {
     const topicWords = db.words.filter(w => w.topicId === topicId);
     if (topicWords.length === 0) { alert("Chủ đề này không có từ vựng!"); return; }
-
     const hot = hotRef.current?.hotInstance;
     if (hot) {
       const topicName = db.topics.find(t => t.id === topicId)?.name || "";
       const currentRows = hot.countRows();
-      
       hot.alter('insert_row_below', currentRows, topicWords.length);
-      
       const updates = [];
       topicWords.forEach((word, index) => {
         const r = currentRows + index;
@@ -225,17 +244,8 @@ export default function Spreadsheet({ activeTopicIds, onBack }) {
     }
   };
 
-  const tableColumns = useMemo(() => [
-    { data: "zh", type: "text", width: 160, className: "htLarge font-medium text-lg htMiddle" },
-    { data: "py", type: "text", width: 200, className: "htCenter htMiddle" },
-    { data: "vi", type: "text", width: 350, className: "htMiddle" },
-    { data: "topicName", type: "dropdown", source: db.topics.filter(t => t.id !== DRAFT_TOPIC_ID).map(t => t.name), width: 180, className: "htMiddle text-slate-500 font-bold" }
-  ], [db.topics]);
-
   return (
     <div className="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden flex flex-col min-h-[800px]">
-      
-      {/* Nút Quay Lại Chuyên Nghiệp */}
       <div className="bg-slate-800 px-4 py-3 flex items-center justify-between shadow-md z-10">
         <button onClick={handleIntentionalExit} className="text-white hover:bg-slate-700 px-4 py-1.5 rounded-md font-semibold transition-colors flex items-center gap-2">
           ⬅ <span className="hidden sm:inline">Quay lại Thư viện</span>
@@ -257,13 +267,11 @@ export default function Spreadsheet({ activeTopicIds, onBack }) {
           onPlayGame={handleOpenGame}
         />
 
-        {/* CỐ ĐỊNH CHIỀU CAO BẰNG PIXEL CHỐNG LỖI MẤT CỘT */}
         <div className="border border-slate-300 rounded shadow-inner bg-white overflow-hidden origin-top-left transition-transform" style={{ zoom: `${zoomLevel}%` }}>
           <HotTable
             ref={hotRef} data={tableData} columns={tableColumns}
             colHeaders={["Chinese", "Pinyin", "Nghĩa tiếng Việt", "Chủ đề (Gõ mới để tạo)"]}
-            rowHeaders={true} width="100%" 
-            height="600" /* <--- LỖI NẰM Ở ĐÂY, PHẢI SET CHIỀU CAO CỐ ĐỊNH */
+            rowHeaders={true} width="100%" height="600"
             afterChange={handleAfterChange} 
             afterRemoveRow={syncToDatabaseDebounced}
             afterCreateRow={(index, amount) => {
@@ -279,41 +287,22 @@ export default function Spreadsheet({ activeTopicIds, onBack }) {
         </div>
       </div>
 
-      {/* HỘP THOẠI CẢNH BÁO "BẢN NHÁP" KHI THOÁT */}
       {showDraftModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center z-[9999] p-4">
           <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-md w-full">
             <h3 className="text-xl font-bold text-slate-800 mb-2">⚠️ Có từ vựng chưa được lưu!</h3>
-            <p className="text-slate-600 mb-6 text-sm leading-relaxed">
-              Bạn đã tạo ra một số từ vựng mới nhưng chưa gắn cho chủ đề nào. Bạn muốn lưu chúng thành một chủ đề mới hay xóa bỏ?
-            </p>
-            
-            <input 
-              type="text" autoFocus
-              placeholder="Nhập tên chủ đề mới..." 
-              className="w-full px-4 py-3 border border-slate-300 rounded-lg mb-6 focus:ring-2 focus:ring-indigo-500 outline-none font-medium"
-              value={draftTopicName} onChange={e => setDraftTopicName(e.target.value)}
-            />
-
+            <p className="text-slate-600 mb-6 text-sm leading-relaxed">Bạn đã tạo ra một số từ vựng mới nhưng chưa gắn cho chủ đề nào. Bạn muốn lưu chúng thành một chủ đề mới hay xóa bỏ?</p>
+            <input type="text" autoFocus placeholder="Nhập tên chủ đề mới..." className="w-full px-4 py-3 border border-slate-300 rounded-lg mb-6 focus:ring-2 focus:ring-indigo-500 outline-none font-medium" value={draftTopicName} onChange={e => setDraftTopicName(e.target.value)} />
             <div className="flex flex-col gap-3">
-              <button onClick={() => handleResolveDraft("SAVE")} className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition-colors">
-                💾 Lưu thành chủ đề mới & Thoát
-              </button>
-              <button onClick={() => handleResolveDraft("DISCARD")} className="w-full py-3 bg-red-50 hover:bg-red-100 text-red-600 font-bold rounded-lg transition-colors">
-                🗑️ Không lưu (Xóa nháp) & Thoát
-              </button>
-              <button onClick={() => setShowDraftModal(false)} className="w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg transition-colors">
-                ❌ Hủy (Ở lại trang tính)
-              </button>
+              <button onClick={() => handleResolveDraft("SAVE")} className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition-colors">💾 Lưu thành chủ đề mới & Thoát</button>
+              <button onClick={() => handleResolveDraft("DISCARD")} className="w-full py-3 bg-red-50 hover:bg-red-100 text-red-600 font-bold rounded-lg transition-colors">🗑️ Không lưu (Xóa nháp) & Thoát</button>
+              <button onClick={() => setShowDraftModal(false)} className="w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg transition-colors">❌ Hủy (Ở lại trang tính)</button>
             </div>
           </div>
         </div>
       )}
       
-      {/* MODAL GAME */}
-      {isGameOpen && (
-        <GameModal questions={gameQuestions} onClose={() => setIsGameOpen(false)} />
-      )}
+      {isGameOpen && <GameModal questions={gameQuestions} onClose={() => setIsGameOpen(false)} />}
     </div>
   );
 }
