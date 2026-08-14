@@ -1,3 +1,4 @@
+// src/components/Spreadsheet.jsx
 import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import { HotTable } from "@handsontable/react-wrapper";
 import { registerAllModules } from "handsontable/registry";
@@ -45,50 +46,54 @@ export default function Spreadsheet({ activeTopicIds, onBack }) {
     }
   }, [activeTopicIds]);
 
-  // 2. ĐỒNG BỘ NGẦM (Lưu ý: Từ mới KHÔNG CHỌN Chủ đề sẽ bay vào DRAFT)
-  const syncToDatabase = useCallback(() => {
-    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+  // 2. HÀM THỰC THI ĐỒNG BỘ DỮ LIỆU (Lưu Tức Thì)
+  const performSync = useCallback(() => {
+    const hot = hotRef.current?.hotInstance;
+    if (!hot) return;
 
-    saveTimeoutRef.current = setTimeout(() => {
-      const hot = hotRef.current?.hotInstance;
-      if (!hot) return;
+    const currentTableData = hot.getSourceData();
+    const currentDb = getDB(); 
+    let updatedTopics = [...currentDb.topics];
+    let updatedWords = [...currentDb.words];
 
-      const currentTableData = hot.getSourceData();
-      const currentDb = getDB(); 
-      let updatedTopics = [...currentDb.topics];
-      let updatedWords = [...currentDb.words];
+    currentTableData.forEach(row => {
+      if (!row.zh && !row.py && !row.vi) return; // Bỏ qua dòng trống
 
-      currentTableData.forEach(row => {
-        if (!row.zh && !row.py && !row.vi) return; 
+      let finalTopicId = DRAFT_TOPIC_ID; 
 
-        let finalTopicId = DRAFT_TOPIC_ID; 
-
-        if (row.topicName && String(row.topicName).trim() !== "") {
-          let matchedTopic = updatedTopics.find(t => t.name === row.topicName);
-          if (!matchedTopic) {
-            matchedTopic = { id: generateId("t"), name: row.topicName };
-            updatedTopics.push(matchedTopic);
-          }
-          finalTopicId = matchedTopic.id;
+      if (row.topicName && String(row.topicName).trim() !== "") {
+        let matchedTopic = updatedTopics.find(t => t.name === row.topicName);
+        if (!matchedTopic) {
+          matchedTopic = { id: generateId("t"), name: row.topicName };
+          updatedTopics.push(matchedTopic);
         }
+        finalTopicId = matchedTopic.id;
+      }
 
-        const wordPayload = {
-          id: row.id || generateId("w"), 
-          zh: row.zh || "", 
-          py: row.py || "", 
-          vi: row.vi || "", 
-          topicId: finalTopicId
-        };
+      const wordPayload = {
+        id: row.id || generateId("w"), 
+        zh: row.zh || "", 
+        py: row.py || "", 
+        vi: row.vi || "", 
+        topicId: finalTopicId
+      };
 
-        const existingIdx = updatedWords.findIndex(w => w.id === row.id);
-        if (existingIdx >= 0) updatedWords[existingIdx] = wordPayload;
-        else updatedWords.push(wordPayload);
-      });
+      const existingIdx = updatedWords.findIndex(w => w.id === row.id);
+      if (existingIdx >= 0) updatedWords[existingIdx] = wordPayload;
+      else updatedWords.push(wordPayload);
+    });
 
-      saveDB({ topics: updatedTopics, words: updatedWords });
-      setDb({ topics: updatedTopics, words: updatedWords });
-    }, 1000); 
+    saveDB({ topics: updatedTopics, words: updatedWords });
+    setDb({ topics: updatedTopics, words: updatedWords });
   }, []);
+
+  // 2.1 HÀM HẸN GIỜ ĐỒNG BỘ (Chống lag khi đang gõ chữ)
+  const syncToDatabaseDebounced = useCallback(() => {
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = setTimeout(() => {
+      performSync();
+    }, 1000); 
+  }, [performSync]);
 
   // 3. AUTO FILL THÔNG MINH
   const handleAfterChange = useCallback((changes, source) => {
@@ -114,8 +119,19 @@ export default function Spreadsheet({ activeTopicIds, onBack }) {
     });
 
     if (updates.length > 0) hot.setDataAtCell(updates, "dictionaryAutoFill");
-    syncToDatabase();
-  }, [syncToDatabase]);
+    syncToDatabaseDebounced();
+  }, [syncToDatabaseDebounced]);
+
+  // --- CÁC HÀM XỬ LÝ ROW AN TOÀN ---
+  const handleAddRow = (n) => {
+    const hot = hotRef.current?.hotInstance;
+    if (hot) hot.alter('insert_row_below', hot.countRows(), n);
+  };
+
+  const handleDeleteRow = () => {
+    const hot = hotRef.current?.hotInstance;
+    if (hot && hot.countRows() > 0) hot.alter('remove_row', hot.countRows() - 1, 1);
+  };
 
   // --- HÀM QUẢN LÝ EXCEL & GAME TẠI BẢNG ---
   function handleExport() {
@@ -125,10 +141,9 @@ export default function Spreadsheet({ activeTopicIds, onBack }) {
 
   function handleImport(file) {
     importExcel(file, (newData) => {
-      // Gán thêm ID ngầm cho dữ liệu import từ ngoài vào để an toàn
       const safeData = newData.map(row => ({ ...row, id: generateId("w") }));
       setTableData(safeData);
-      syncToDatabase();
+      syncToDatabaseDebounced();
     });
   }
 
@@ -147,20 +162,23 @@ export default function Spreadsheet({ activeTopicIds, onBack }) {
     setIsGameOpen(true);
   }
 
-  // --- XỬ LÝ QUAY LẠI (KIỂM TRA HỖN ĐỘN) ---
+  // --- XỬ LÝ QUAY LẠI (KIỂM TRA HỖN ĐỘN - LƯU TỨC THÌ) ---
   const handleIntentionalExit = () => {
-    syncToDatabase(); 
+    // 1. Hủy bỏ đếm ngược chống lag
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     
-    setTimeout(() => {
-      const freshDb = getDB();
-      const hasDraftWords = freshDb.words.some(w => w.topicId === DRAFT_TOPIC_ID);
+    // 2. Ép hệ thống lưu ngay lập tức (Instant Save)
+    performSync(); 
+    
+    // 3. Kiểm tra xem có từ nào vừa chui vào Bản nháp không
+    const freshDb = getDB();
+    const hasDraftWords = freshDb.words.some(w => w.topicId === DRAFT_TOPIC_ID);
 
-      if (hasDraftWords) {
-        setShowDraftModal(true); 
-      } else {
-        onBack(); 
-      }
-    }, 1100); // Đợi debounce sync chạy xong
+    if (hasDraftWords) {
+      setShowDraftModal(true); 
+    } else {
+      onBack(); 
+    }
   };
 
   const handleResolveDraft = (action) => {
@@ -230,8 +248,8 @@ export default function Spreadsheet({ activeTopicIds, onBack }) {
           zoom={zoomLevel} setZoom={setZoomLevel} 
           onLoadMoreTopic={handleLoadMoreTopic}
           availableTopics={db.topics.filter(t => t.id !== DRAFT_TOPIC_ID)}
-          addRow={(n) => hotRef.current?.hotInstance?.alter('insert_row_below', hotRef.current.hotInstance.countRows(), n)}
-          deleteRow={() => hotRef.current?.hotInstance?.alter('remove_row', hotRef.current.hotInstance.countRows() - 1, 1)}
+          addRow={handleAddRow}
+          deleteRow={handleDeleteRow}
           undo={() => hotRef.current?.hotInstance?.undo()}
           redo={() => hotRef.current?.hotInstance?.redo()}
           exportExcel={handleExport}
@@ -239,16 +257,21 @@ export default function Spreadsheet({ activeTopicIds, onBack }) {
           onPlayGame={handleOpenGame}
         />
 
-        {/* Khung Zoom CSS */}
-        <div className="flex-1 border border-slate-300 rounded shadow-inner bg-white overflow-hidden origin-top-left transition-transform" style={{ zoom: `${zoomLevel}%` }}>
+        {/* CỐ ĐỊNH CHIỀU CAO BẰNG PIXEL CHỐNG LỖI MẤT CỘT */}
+        <div className="border border-slate-300 rounded shadow-inner bg-white overflow-hidden origin-top-left transition-transform" style={{ zoom: `${zoomLevel}%` }}>
           <HotTable
             ref={hotRef} data={tableData} columns={tableColumns}
             colHeaders={["Chinese", "Pinyin", "Nghĩa tiếng Việt", "Chủ đề (Gõ mới để tạo)"]}
-            rowHeaders={true} width="100%" height="100%"
-            afterChange={handleAfterChange} afterRemoveRow={syncToDatabase}
+            rowHeaders={true} width="100%" 
+            height="600" /* <--- LỖI NẰM Ở ĐÂY, PHẢI SET CHIỀU CAO CỐ ĐỊNH */
+            afterChange={handleAfterChange} 
+            afterRemoveRow={syncToDatabaseDebounced}
             afterCreateRow={(index, amount) => {
-               for(let i=0; i<amount; i++) hotRef.current?.hotInstance?.setDataAtRowProp(index + i, "id", generateId("w"), "loadData");
-               syncToDatabase();
+               const hot = hotRef.current?.hotInstance;
+               if(hot) {
+                  for(let i=0; i<amount; i++) hot.setDataAtRowProp(index + i, "id", generateId("w"), "loadData");
+               }
+               syncToDatabaseDebounced();
             }}
             licenseKey="non-commercial-and-evaluation"
             autoRowSize={false} autoColumnSize={false} rowHeights={48}
@@ -287,7 +310,7 @@ export default function Spreadsheet({ activeTopicIds, onBack }) {
         </div>
       )}
       
-      {/* MODAL GAME KHI CHƠI TRONG BẢNG */}
+      {/* MODAL GAME */}
       {isGameOpen && (
         <GameModal questions={gameQuestions} onClose={() => setIsGameOpen(false)} />
       )}
