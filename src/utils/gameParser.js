@@ -1,23 +1,20 @@
-// src/utils/gameParser.js
-
 export function parseGameData(tableData) {
   const questions = [];
 
   if (!tableData || !Array.isArray(tableData)) return questions;
 
   tableData.forEach((row, index) => {
-    // 1. Tương thích cả dữ liệu Object mới (row.zh) và mảng cũ (row[0])
     const chineseText = row.zh !== undefined ? row.zh : row[0];
-    const meaningText = row.vi !== undefined ? row.vi : row[2];
+    const pinyinText = row.py !== undefined ? row.py : row[1]; // Lấy Pinyin
+    const meaningText = row.vi !== undefined ? row.vi : row[2]; // Lấy toàn bộ nghĩa
 
     if (!chineseText || typeof chineseText !== "string") return;
 
     let promptText = "";
     let targetAnswer = "";
 
-    // KỊCH BẢN A: Người dùng gõ theo format cũ "CâuHỏi : ĐápÁn1 / ĐápÁn2" ở cột 1
+    // Kịch bản A: Format cũ có dấu ":" 
     if (chineseText.includes(":") || chineseText.includes("：")) {
-      // Chuẩn hóa dấu hai chấm và TẤT CẢ các loại dấu ngăn cách (/, ,, ., 、) thành dấu /
       const normalized = chineseText
         .replace(/[：]/g, ":")
         .replace(/[／、,，.。]/g, "/");
@@ -26,28 +23,25 @@ export function parseGameData(tableData) {
       if (parts.length >= 2) {
         promptText = parts[0].trim();
         const rawAnswer = parts.slice(1).join(":").trim();
-        // Cắt theo dấu / và lấy đáp án đầu tiên
         targetAnswer = rawAnswer.split("/")[0].trim();
       }
     } 
-    // KỊCH BẢN B (Chuẩn mới): Lấy Cột 1 làm Câu hỏi, Cột 3 (Nghĩa) làm Đáp án
+    // Kịch bản B: Chuẩn mới (cột Tiếng Trung riêng, Nghĩa riêng)
     else if (meaningText && typeof meaningText === "string") {
       promptText = chineseText.trim();
       
-      // Biểu thức chính quy (Regex) này sẽ cắt chuỗi mỗi khi gặp dấu "/", ",", ".", "，", "。"
-      // Đồng thời tự dọn dẹp khoảng trắng thừa ở 2 đầu (\s*)
-      const options = meaningText.split(/\s*[\/,\.，。]\s*/);
-      
-      // Chỉ lấy ý nghĩa đầu tiên làm đáp án đúng cho Game
+      // Tách lấy nghĩa đầu tiên làm đáp án để chơi game
+      const options = meaningText.split(/\s*[\/,\.，。;；]\s*/);
       targetAnswer = options[0].trim();
     }
 
-    // Đẩy vào mảng câu hỏi nếu lấy được cả câu hỏi lẫn đáp án
     if (promptText && targetAnswer) {
       questions.push({
-        id: row.id || index, // Lấy ID ngầm của từ vựng nếu có
+        id: row.id || index,
         prompt: promptText,
         answer: targetAnswer,
+        pinyin: pinyinText || "",             // 🚀 Bổ sung mang Pinyin vào Game
+        fullMeaning: meaningText || targetAnswer // 🚀 Bổ sung mang Toàn bộ nghĩa vào Game
       });
     }
   });

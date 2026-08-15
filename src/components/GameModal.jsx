@@ -1,19 +1,13 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { playSound } from "../utils/sound";
 
-// ============================================================================
-// 🚀 ĐIỂM TỐI ƯU CỐT LÕI CHỐNG LAG: Tách đồng hồ ra Component riêng
-// Chỉ cái đồng hồ này bị re-render mỗi giây, GameModal sẽ KHÔNG bị re-render
-// ============================================================================
 function CountdownTimer({ active, timeLimit, resetKey, onTimeOut }) {
   const [timeLeft, setTimeLeft] = useState(timeLimit);
 
-  // Reset lại thời gian khi chuyển qua câu hỏi khác
   useEffect(() => {
     setTimeLeft(timeLimit);
   }, [resetKey, timeLimit]);
 
-  // Bộ đếm 1 giây
   useEffect(() => {
     if (!active) return;
     
@@ -21,7 +15,7 @@ function CountdownTimer({ active, timeLimit, resetKey, onTimeOut }) {
       setTimeLeft((prev) => {
         if (prev <= 1) {
           clearInterval(timerId);
-          onTimeOut(); // Hết giờ thì gửi tín hiệu báo lên cho GameModal
+          onTimeOut(); 
           return 0;
         }
         return prev - 1;
@@ -43,13 +37,11 @@ function CountdownTimer({ active, timeLimit, resetKey, onTimeOut }) {
 }
 
 export default function GameModal({ questions, onClose }) {
-  // --- STATE CÀI ĐẶT ---
   const [isPlaying, setIsPlaying] = useState(false);
   const [timeLimit, setTimeLimit] = useState(30); 
   const [maxWrongAllowed, setMaxWrongAllowed] = useState(1); 
   const [optionsCount, setOptionsCount] = useState(6);
 
-  // --- STATE TRÒ CHƠI ---
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isGameOver, setIsGameOver] = useState(false);
   const [isReviewMode, setIsReviewMode] = useState(false);
@@ -96,7 +88,6 @@ export default function GameModal({ questions, onClose }) {
     return Object.values(questionProgress).filter((item) => item.solved).length;
   }, [questionProgress]);
 
-  // Xử lý khi Hết giờ: Đóng gói cẩn thận bằng useCallback để không kích hoạt re-render bậy bạ
   const handleTimeOut = useCallback(() => {
     playSound("wrong");
     setQuestionProgress((prev) => {
@@ -192,7 +183,6 @@ export default function GameModal({ questions, onClose }) {
     return "grid-cols-4 md:grid-cols-5";
   }, [optionsCount]);
 
-  // Đóng băng khu vực thanh tiến độ 1000 câu
   const paginationUI = useMemo(() => {
     return (
       <div className="flex gap-1.5 overflow-x-auto pb-2 px-1 max-w-full justify-start md:justify-center scrollbar-thin scrollbar-thumb-slate-200">
@@ -226,7 +216,6 @@ export default function GameModal({ questions, onClose }) {
     );
   }, [shuffledQuestions.length, currentIndex, questionProgress]);
 
-  // Đóng băng khu vực Đáp án
   const optionsUI = useMemo(() => {
     return (
       <div className={`grid ${gridClass} gap-3 max-h-[300px] overflow-y-auto p-1 scrollbar-thin scrollbar-thumb-slate-200`}>
@@ -377,6 +366,11 @@ export default function GameModal({ questions, onClose }) {
                         {!prog.isCorrect && prog.wrongCount === 0 && prog.solved && (
                           <div className="text-sm text-amber-500">Hết thời gian</div>
                         )}
+                        {/* Hiện full giải thích trong tab Review */}
+                        <div className="text-sm text-slate-600 mt-1">
+                          <span className="font-semibold text-indigo-600 mr-2">[{q.pinyin}]</span>
+                          {q.fullMeaning}
+                        </div>
                       </div>
                     </div>
                     
@@ -440,7 +434,6 @@ export default function GameModal({ questions, onClose }) {
           </div>
         ) : (
           <div className="flex flex-col h-full justify-between">
-            {/* Header Toolbar */}
             <div className="flex justify-between items-center border-b border-slate-100 pb-4 mb-4 flex-wrap gap-y-3">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-bold text-slate-700 bg-slate-100 px-3 py-1.5 rounded-lg">
@@ -474,7 +467,6 @@ export default function GameModal({ questions, onClose }) {
                   ⭐ {correctCount} đ
                 </div>
                 
-                {/* 🚀 ĐẶT COMPONENT ĐỒNG HỒ Ở ĐÂY VÀ TRUYỀN PROPS CHO NÓ */}
                 {!currentProgress.solved && (
                   <CountdownTimer
                     active={isTimerActive}
@@ -497,7 +489,7 @@ export default function GameModal({ questions, onClose }) {
               {paginationUI} 
             </div>
 
-            <div className="my-auto transition-transform origin-top" style={{ zoom: `${zoomLevel}%` }}>
+            <div className="my-auto transition-transform origin-top flex flex-col justify-center" style={{ zoom: `${zoomLevel}%` }}>
               <div className="text-center mb-8">
                 <span className="text-xs uppercase tracking-widest text-slate-400 font-bold block mb-2">
                   {currentProgress.solved
@@ -516,6 +508,32 @@ export default function GameModal({ questions, onClose }) {
                 }`}>
                   {currentQuestion.prompt}
                 </div>
+
+                {/* 🚀 KHU VỰC HIỂN THỊ GIẢI THÍCH MỚI */}
+                {currentProgress.solved && (
+                  <div className="mt-6 max-w-2xl mx-auto opacity-0 animate-[fadeIn_0.3s_ease-out_forwards]">
+                    <div className={`p-4 rounded-2xl border text-left flex items-start gap-4 shadow-sm transition-all ${
+                      currentProgress.isCorrect 
+                        ? "bg-green-50 border-green-200" 
+                        : "bg-red-50 border-red-200"
+                    }`}>
+                      <div className={`text-2xl mt-1 ${currentProgress.isCorrect ? "text-green-500" : "text-red-500"}`}>
+                        {currentProgress.isCorrect ? "💡" : "📝"}
+                      </div>
+                      <div>
+                        <div className={`text-xs font-bold uppercase mb-1 ${currentProgress.isCorrect ? "text-green-700/70" : "text-red-700/70"}`}>
+                          Giải thích chi tiết
+                        </div>
+                        <div className="text-base font-medium text-slate-800">
+                          {currentQuestion.pinyin && (
+                            <span className="font-bold text-indigo-600 mr-2">[{currentQuestion.pinyin}]</span>
+                          )}
+                          <span>{currentQuestion.fullMeaning}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {optionsUI}
