@@ -6,18 +6,19 @@ export function lookup(text) {
   const input = text.trim();
   if (!input) return null;
 
-  // 1. Tìm chính xác 1 từ / cụm từ
+  // 1. Tìm chính xác từ đơn / cụm từ
   if (dictionary.has(input)) {
     const entry = dictionary.get(input);
     return {
       pinyin: convertNumberedToMarked(entry.p),
-      meaning: entry.m, // 🚀 FIX LỖI 1: Bổ sung lấy nghĩa tiếng Việt từ từ điển
+      meaning: entry.m || "",
     };
   }
 
-  // 2. Longest Match cho câu dài hoặc cụm từ ghép
+  // 2. Longest Match cho từ ghép hoặc câu dài
   let index = 0;
   const pinyinParts = [];
+  const meaningParts = [];
 
   while (index < input.length) {
     let matched = false;
@@ -26,6 +27,7 @@ export function lookup(text) {
       if (dictionary.has(sub)) {
         const entry = dictionary.get(sub);
         pinyinParts.push(convertNumberedToMarked(entry.p));
+        if (entry.m) meaningParts.push(entry.m);
         index += len;
         matched = true;
         break;
@@ -34,7 +36,6 @@ export function lookup(text) {
 
     if (!matched) {
       const char = input[index];
-      // Kiểm tra nếu ký tự này là dấu câu (/, :, ：, ...) thì đệm khoảng trắng cho đẹp
       if (/[/:：,，;；]/.test(char)) {
         pinyinParts.push(` ${char} `);
       } else if (/\s/.test(char)) {
@@ -48,13 +49,8 @@ export function lookup(text) {
 
   if (pinyinParts.length === 0) return null;
 
-  // Nối các phần lại, sau đó dọn dẹp các khoảng trắng bị lặp/thừa
-  const formattedPinyin = pinyinParts
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim();
-
   return {
-    pinyin: formattedPinyin,
+    pinyin: pinyinParts.join(" ").replace(/\s+/g, " ").trim(),
+    meaning: meaningParts.join("; ").trim(),
   };
 }

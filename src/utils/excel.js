@@ -1,7 +1,6 @@
 import * as XLSX from "xlsx";
 
-export function exportExcel(data) {
-  // Thêm cột Chủ đề vào file xuất ra
+export function exportExcel(data, topicName) {
   const headers = [["Chinese", "Pinyin", "Meaning", "Topic"]];
   
   const rows = data.map((row) => [
@@ -15,7 +14,10 @@ export function exportExcel(data) {
   const workbook = XLSX.utils.book_new();
 
   XLSX.utils.book_append_sheet(workbook, worksheet, "Dictionary");
-  XLSX.writeFile(workbook, "TuVungTiengTrung.xlsx");
+  
+  // Xử lý tên file động
+  const safeName = topicName ? topicName.replace(/[<>:"/\\|?*]+/g, "") : "TuVung";
+  XLSX.writeFile(workbook, `${safeName}.xlsx`);
 }
 
 export function importExcel(file, onCompleted) {
@@ -27,18 +29,35 @@ export function importExcel(file, onCompleted) {
     const firstSheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[firstSheetName];
 
-    // Read thành mảng 2 chiều
     const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+    if (!jsonData || jsonData.length < 2) return;
 
-    // Ép kiểu mảng 2 chiều về dạng Object để Handsontable đọc được
+    const headers = jsonData[0].map(h => (h || "").toString().toLowerCase());
+
+    let zhIdx = headers.findIndex(h => h.includes("trung") || h.includes("chinese") || h.includes("zh") || h.includes("hán"));
+    let pyIdx = headers.findIndex(h => h.includes("phiên âm") || h.includes("phien am") || h.includes("pinyin") || h.includes("py"));
+    let viIdx = headers.findIndex(h => h.includes("nghĩa") || h.includes("nghia") || h.includes("tiếng việt") || h.includes("tieng viet") || h.includes("vi"));
+    let topicIdx = headers.findIndex(h => h.includes("chủ đề") || h.includes("chu de") || h.includes("topic"));
+
+    if (zhIdx === -1 && pyIdx === -1 && viIdx === -1) {
+      if (headers.length === 4) {
+        zhIdx = 0; pyIdx = 1; viIdx = 2; topicIdx = 3;
+      } else if (headers.length >= 2) {
+        const hasSTT = headers[0].includes("stt");
+        zhIdx = hasSTT ? 1 : 0;
+        pyIdx = hasSTT ? 2 : 1;
+        viIdx = hasSTT ? 3 : 2;
+      }
+    }
+
     const formattedData = jsonData
       .slice(1)
       .filter((row) => row.some((cell) => cell !== "" && cell !== undefined))
       .map((row) => ({
-        zh: row[0] ? String(row[0]) : "",
-        py: row[1] ? String(row[1]) : "",
-        vi: row[2] ? String(row[2]) : "",
-        topicName: row[3] ? String(row[3]) : "", // Load lại chủ đề nếu có
+        zh: zhIdx !== -1 && row[zhIdx] ? String(row[zhIdx]) : "",
+        py: pyIdx !== -1 && row[pyIdx] ? String(row[pyIdx]) : "",
+        vi: viIdx !== -1 && row[viIdx] ? String(row[viIdx]) : "",
+        topicName: topicIdx !== -1 && row[topicIdx] ? String(row[topicIdx]) : "",
       }));
 
     if (onCompleted && formattedData.length > 0) {
