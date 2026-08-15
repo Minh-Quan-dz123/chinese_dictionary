@@ -88,6 +88,8 @@ export default function GameModal({ questions, onClose }) {
     return Object.values(questionProgress).filter((item) => item.solved).length;
   }, [questionProgress]);
 
+  const isAllSolved = completedCount === shuffledQuestions.length;
+
   const handleTimeOut = useCallback(() => {
     playSound("wrong");
     setQuestionProgress((prev) => {
@@ -135,7 +137,6 @@ export default function GameModal({ questions, onClose }) {
         [currentIndex]: { ...currentProgress, solved: true, isCorrect: true },
       };
       setQuestionProgress(nextProgress);
-      checkGameOver(nextProgress);
     } else {
       playSound("wrong");
       const nextWrongCount = currentProgress.wrongCount + 1;
@@ -152,15 +153,6 @@ export default function GameModal({ questions, onClose }) {
         },
       };
       setQuestionProgress(nextProgress);
-      if (isFailedNow) checkGameOver(nextProgress);
-    }
-  }
-
-  function checkGameOver(progress) {
-    const allSolved = Object.values(progress).every((item) => item.solved);
-    if (allSolved) {
-      playSound("finish");
-      setIsGameOver(true);
     }
   }
 
@@ -315,9 +307,6 @@ export default function GameModal({ questions, onClose }) {
                   <option value="9">9 đáp án (Khó)</option>
                   <option value="12">12 đáp án (Cực khó)</option>
                 </datalist>
-                <p className="text-xs text-slate-400 mt-1">
-                  * Có thể tự gõ số bất kỳ hoặc chọn từ danh sách gợi ý.
-                </p>
               </div>
             </div>
 
@@ -359,16 +348,15 @@ export default function GameModal({ questions, onClose }) {
                       <div>
                         <div className="text-xl font-bold text-slate-800 mb-1">{q.prompt}</div>
                         {prog.wrongCount > 0 && !isCorrect && (
-                          <div className="text-sm text-red-500">
+                          <div className="text-sm text-red-500 mb-1">
                             Đã chọn sai: {prog.selectedWrongs.join(", ")} {prog.wrongCount >= maxWrongAllowed && "(Hết lượt)"}
                           </div>
                         )}
                         {!prog.isCorrect && prog.wrongCount === 0 && prog.solved && (
-                          <div className="text-sm text-amber-500">Hết thời gian</div>
+                          <div className="text-sm text-amber-500 mb-1">Hết thời gian</div>
                         )}
-                        {/* Hiện full giải thích trong tab Review */}
-                        <div className="text-sm text-slate-600 mt-1">
-                          <span className="font-semibold text-indigo-600 mr-2">[{q.pinyin}]</span>
+                        <div className="text-sm text-slate-600 mt-1 bg-white/60 p-2 rounded-lg inline-block">
+                          <span className="font-bold text-indigo-600 mr-2">[{q.pinyin}]</span>
                           {q.fullMeaning}
                         </div>
                       </div>
@@ -490,7 +478,7 @@ export default function GameModal({ questions, onClose }) {
             </div>
 
             <div className="my-auto transition-transform origin-top flex flex-col justify-center" style={{ zoom: `${zoomLevel}%` }}>
-              <div className="text-center mb-8">
+              <div className="text-center mb-6">
                 <span className="text-xs uppercase tracking-widest text-slate-400 font-bold block mb-2">
                   {currentProgress.solved
                     ? currentProgress.isCorrect
@@ -509,9 +497,9 @@ export default function GameModal({ questions, onClose }) {
                   {currentQuestion.prompt}
                 </div>
 
-                {/* 🚀 KHU VỰC HIỂN THỊ GIẢI THÍCH MỚI */}
+                {/* 🚀 KHU VỰC HIỂN THỊ GIẢI THÍCH (Đã bỏ opacity-0) */}
                 {currentProgress.solved && (
-                  <div className="mt-6 max-w-2xl mx-auto opacity-0 animate-[fadeIn_0.3s_ease-out_forwards]">
+                  <div className="mt-6 max-w-2xl mx-auto">
                     <div className={`p-4 rounded-2xl border text-left flex items-start gap-4 shadow-sm transition-all ${
                       currentProgress.isCorrect 
                         ? "bg-green-50 border-green-200" 
@@ -555,13 +543,23 @@ export default function GameModal({ questions, onClose }) {
                 Dừng & Thoát
               </button>
 
-              <button
-                onClick={handleNext}
-                disabled={currentIndex === shuffledQuestions.length - 1}
-                className="px-5 py-2.5 rounded-xl bg-slate-800 text-white font-semibold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-900 transition cursor-pointer"
-              >
-                <span className="hidden sm:inline">Câu tiếp</span> ➡
-              </button>
+              {/* Thay đổi nút nếu là câu cuối cùng */}
+              {isAllSolved ? (
+                <button
+                  onClick={() => setIsGameOver(true)}
+                  className="px-5 py-2.5 rounded-xl bg-green-600 text-white font-bold hover:bg-green-700 transition cursor-pointer shadow-md animate-pulse"
+                >
+                  Xem Kết Quả 🏆
+                </button>
+              ) : (
+                <button
+                  onClick={handleNext}
+                  disabled={currentIndex === shuffledQuestions.length - 1}
+                  className="px-5 py-2.5 rounded-xl bg-slate-800 text-white font-semibold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-900 transition cursor-pointer"
+                >
+                  <span className="hidden sm:inline">Câu tiếp</span> ➡
+                </button>
+              )}
             </div>
           </div>
         )}
