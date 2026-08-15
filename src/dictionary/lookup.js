@@ -11,6 +11,7 @@ export function lookup(text) {
     const entry = dictionary.get(input);
     return {
       pinyin: convertNumberedToMarked(entry.p),
+      meaning: entry.m, // 🚀 FIX LỖI 1: Bổ sung lấy nghĩa tiếng Việt từ từ điển
     };
   }
 

@@ -107,11 +107,24 @@ export default function Spreadsheet({ activeTopicIds, onBack }) {
     });
 
     rowChanges.forEach((cols, row) => {
-      if (cols.hasOwnProperty("zh") && !cols.py && !cols.vi) {
-        if (!cols.zh) updates.push([row, "py", ""]); 
-        else {
-          const result = lookup(String(cols.zh));
-          if (result) updates.push([row, "py", result.pinyin]);
+      if (cols.hasOwnProperty("zh")) {
+        // 🚀 FIX LỖI 2: Chống ghi đè khi copy/paste nhiều cột. 
+        // Lấy dữ liệu THỰC TẾ đang có ở dòng này để kiểm tra xem có phải đang paste hay không.
+        const currentPy = hot.getDataAtRowProp(row, "py");
+        const currentVi = hot.getDataAtRowProp(row, "vi");
+        
+        // Chỉ kích hoạt Autofill tra từ điển NẾU 2 cột bên cạnh đang rỗng
+        if (!cols.py && !cols.vi && !currentPy && !currentVi) {
+          if (!cols.zh) {
+            updates.push([row, "py", ""]); 
+            updates.push([row, "vi", ""]);
+          } else {
+            const result = lookup(String(cols.zh));
+            if (result) {
+              if (result.pinyin) updates.push([row, "py", result.pinyin]);
+              if (result.meaning) updates.push([row, "vi", result.meaning]); // 🚀 Tích hợp tự điền Nghĩa
+            }
+          }
         }
       }
     });
@@ -150,8 +163,8 @@ export default function Spreadsheet({ activeTopicIds, onBack }) {
     { data: "vi", type: "text", width: 350, className: "htMiddle" },
     { 
       data: "topicName", 
-      type: "dropdown", 
-      // TRICK CHỐNG CRASH: Dùng function thay vì truyền trực tiếp mảng db.topics
+      type: "autocomplete", // 🚀 FIX LỖI 3: Chuyển dropdown thành autocomplete
+      strict: false,        // 🚀 Bỏ giới hạn, cho phép gõ chữ lạ để tạo chủ đề
       source: function(query, process) {
          const currentDb = getDB();
          const names = currentDb.topics.filter(t => t.id !== DRAFT_TOPIC_ID).map(t => t.name);
